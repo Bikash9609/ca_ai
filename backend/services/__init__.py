@@ -1,2 +1,1 @@
-"""Services: OCR, indexing, etc."""
-
+"""Services module for OCR, indexing, etc."""

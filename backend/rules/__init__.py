@@ -1,2 +1,1 @@
-"""Rules engine"""
-
+"""Rules engine module"""

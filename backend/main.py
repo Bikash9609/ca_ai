@@ -5,6 +5,7 @@ Local processing engine for document processing and AI assistance
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from api.routes import router
 
 app = FastAPI(
     title="CA AI Backend",
@@ -21,17 +22,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include API routes
+app.include_router(router, prefix="/api/v1")
+
 
 @app.get("/")
 async def root():
     """Health check endpoint"""
     return {"status": "ok", "service": "CA AI Backend"}
-
-
-@app.get("/health")
-async def health():
-    """Health check endpoint"""
-    return {"status": "healthy"}
 
 
 if __name__ == "__main__":
