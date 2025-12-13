@@ -1,6 +1,24 @@
 import { useState, useEffect } from "react";
+import {
+  Modal,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  Input,
+  Button,
+  Table,
+  TableHeader,
+  TableColumn,
+  TableBody,
+  TableRow,
+  TableCell,
+  Card,
+  CardBody,
+  Tabs,
+  Tab,
+} from "@heroui/react";
 import { useWorkspace } from "../hooks/useWorkspace";
-import Button from "../components/Button";
 import type { Client } from "../types";
 import { api } from "../services/api";
 
@@ -92,106 +110,100 @@ export default function Clients() {
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Clients</h1>
-        <Button onClick={() => setShowCreateDialog(true)}>Add Client</Button>
+        <h1 className="text-2xl font-bold text-foreground">Clients</h1>
+        <Button color="primary" onPress={() => setShowCreateDialog(true)}>
+          Add Client
+        </Button>
       </div>
 
       {/* Create Client Dialog */}
-      {showCreateDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Create New Client</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Client Name *
-                </label>
-                <input
-                  type="text"
+      <Modal
+        isOpen={showCreateDialog}
+        onClose={() => {
+          setShowCreateDialog(false);
+          setCreateForm({ name: "", gstin: "" });
+        }}
+        classNames={{
+          base: "border border-default-200",
+        }}
+      >
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="flex flex-col gap-1">
+                Create New Client
+              </ModalHeader>
+              <ModalBody>
+                <Input
+                  label="Client Name"
+                  placeholder="Enter client name"
                   value={createForm.name}
                   onChange={(e) =>
                     setCreateForm({ ...createForm, name: e.target.value })
                   }
-                  placeholder="Enter client name"
-                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  isRequired
                   autoFocus
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  GSTIN (Optional)
-                </label>
-                <input
-                  type="text"
+                <Input
+                  label="GSTIN (Optional)"
+                  placeholder="Enter GSTIN"
                   value={createForm.gstin}
                   onChange={(e) =>
                     setCreateForm({ ...createForm, gstin: e.target.value })
                   }
-                  placeholder="Enter GSTIN"
-                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <Button
-                onClick={handleCreateClient}
-                disabled={creating || !createForm.name.trim()}
-                className="flex-1"
-              >
-                {creating ? "Creating..." : "Create"}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowCreateDialog(false);
-                  setCreateForm({ name: "", gstin: "" });
-                }}
-                disabled={creating}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+              </ModalBody>
+              <ModalFooter>
+                <Button color="danger" variant="light" onPress={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  color="primary"
+                  onPress={handleCreateClient}
+                  isLoading={creating}
+                  isDisabled={!createForm.name.trim()}
+                >
+                  {creating ? "Creating..." : "Create"}
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
 
       {/* Search and View Controls */}
       <div className="flex gap-4 mb-6">
-        <input
+        <Input
           type="text"
           placeholder="Search clients..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1"
+          classNames={{
+            base: "flex-1",
+          }}
         />
-        <div className="flex gap-2 border rounded-lg p-1">
-          <button
-            onClick={() => setViewMode("grid")}
-            className={`px-3 py-1 rounded ${
-              viewMode === "grid" ? "bg-blue-600 text-white" : "text-gray-600"
-            }`}
-          >
-            Grid
-          </button>
-          <button
-            onClick={() => setViewMode("list")}
-            className={`px-3 py-1 rounded ${
-              viewMode === "list" ? "bg-blue-600 text-white" : "text-gray-600"
-            }`}
-          >
-            List
-          </button>
-        </div>
+        <Tabs
+          selectedKey={viewMode}
+          onSelectionChange={(key) => setViewMode(key as "grid" | "list")}
+          classNames={{
+            base: "border border-default-200 rounded-lg",
+            tabList: "gap-0 p-1",
+            tab: "min-w-20",
+          }}
+        >
+          <Tab key="grid" title="Grid" />
+          <Tab key="list" title="List" />
+        </Tabs>
       </div>
 
       {filteredClients.length === 0 ? (
         <div className="text-center py-12">
-          <p className="text-gray-500 mb-4">
+          <p className="text-default-500 mb-4">
             {searchTerm ? "No clients found" : "No clients found"}
           </p>
           {!searchTerm && (
-            <Button onClick={() => setShowCreateDialog(true)}>
+            <Button color="primary" onPress={() => setShowCreateDialog(true)}>
               Create Your First Client
             </Button>
           )}
@@ -199,66 +211,61 @@ export default function Clients() {
       ) : viewMode === "grid" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredClients.map((client) => (
-            <div
+            <Card
               key={client.id}
-              className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
-              onClick={() => setCurrentClient(client)}
+              isPressable
+              onPress={() => setCurrentClient(client)}
+              classNames={{
+                base: "border border-default-200 hover:border-primary",
+              }}
             >
-              <h3 className="font-semibold text-lg mb-2">{client.name}</h3>
-              {client.gstin && (
-                <p className="text-sm text-gray-600 mb-2">
-                  GSTIN: {client.gstin}
+              <CardBody>
+                <h3 className="font-semibold text-lg mb-2 text-foreground">
+                  {client.name}
+                </h3>
+                {client.gstin && (
+                  <p className="text-sm text-default-600 mb-2">
+                    GSTIN: {client.gstin}
+                  </p>
+                )}
+                <p className="text-xs text-default-400">
+                  Created: {new Date(client.createdAt).toLocaleDateString()}
                 </p>
-              )}
-              <p className="text-xs text-gray-400">
-                Created: {new Date(client.createdAt).toLocaleDateString()}
-              </p>
-            </div>
+              </CardBody>
+            </Card>
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Name
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  GSTIN
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Created
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
+        <Card classNames={{ base: "border border-default-200" }}>
+          <Table aria-label="Clients table">
+            <TableHeader>
+              <TableColumn>Name</TableColumn>
+              <TableColumn>GSTIN</TableColumn>
+              <TableColumn>Created</TableColumn>
+              <TableColumn>Actions</TableColumn>
+            </TableHeader>
+            <TableBody>
               {filteredClients.map((client) => (
-                <tr
+                <TableRow
                   key={client.id}
-                  className="hover:bg-gray-50 cursor-pointer"
+                  className="cursor-pointer"
                   onClick={() => setCurrentClient(client)}
                 >
-                  <td className="px-4 py-3 font-medium">{client.name}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">
-                    {client.gstin || "N/A"}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-600">
+                  <TableCell>{client.name}</TableCell>
+                  <TableCell>{client.gstin || "N/A"}</TableCell>
+                  <TableCell>
                     {new Date(client.createdAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button className="text-blue-600 hover:text-blue-800 text-sm">
+                  </TableCell>
+                  <TableCell>
+                    <Button size="sm" variant="light" color="primary">
                       View
-                    </button>
-                  </td>
-                </tr>
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </div>
   );

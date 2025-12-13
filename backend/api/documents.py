@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -263,34 +264,38 @@ async def process_document_task(task: ProcessingTask) -> dict:
             if is_image:
                 print(f"[PROCESSING STEP] Step 1: Running OCR on image")
                 logger.info(f"Running OCR on image: {file_path}")
-                ocr_result = ocr_engine.process_file(file_path)
+                ocr_result = await asyncio.to_thread(ocr_engine.process_file, file_path)
                 text = ocr_result.get("text", "")
                 print(f"[PROCESSING STEP] OCR completed. Extracted text length: {len(text)} characters")
             elif is_pdf:
                 # Try to extract text first
+                text = ""
                 try:
                     print(f"[PROCESSING STEP] Step 1: Parsing PDF")
-                    parsed = parser.parse(file_path)
-                    text = parsed.get("text", "")
-                    # If no text extracted, try OCR
-                    if not text or len(text.strip()) < 50:
-                        print(f"[PROCESSING STEP] PDF has little/no text, running OCR")
-                        logger.info(f"PDF has little/no text, running OCR: {file_path}")
-                        ocr_result = ocr_engine.process_file(file_path)
+                    # Try text extraction specifically first
+                    from services.parser import PDFParser
+                    text = await asyncio.to_thread(PDFParser.extract_text, file_path)
+                except Exception as e:
+                    logger.debug(f"Error extracting text from PDF: {e}")
+                    text = ""
+                
+                # If no text extracted, try OCR
+                if not text or len(text.strip()) < 50:
+                    print(f"[PROCESSING STEP] PDF has little/no text, running OCR")
+                    logger.info(f"PDF has little/no text, running OCR: {file_path}")
+                    try:
+                        ocr_result = await asyncio.to_thread(ocr_engine.process_file, file_path)
                         text = ocr_result.get("text", "")
                         print(f"[PROCESSING STEP] OCR completed. Extracted text length: {len(text)} characters")
-                    else:
-                        print(f"[PROCESSING STEP] PDF parsing completed. Extracted text length: {len(text)} characters")
-                except Exception as e:
-                    print(f"[PROCESSING STEP] Error parsing PDF, trying OCR: {e}")
-                    logger.warning(f"Error parsing PDF, trying OCR: {e}")
-                    ocr_result = ocr_engine.process_file(file_path)
-                    text = ocr_result.get("text", "")
-                    print(f"[PROCESSING STEP] OCR completed. Extracted text length: {len(text)} characters")
+                    except Exception as ocr_error:
+                        logger.error(f"Error during OCR: {ocr_error}")
+                        print(f"[PROCESSING STEP] OCR failed: {ocr_error}")
+                else:
+                    print(f"[PROCESSING STEP] PDF parsing completed. Extracted text length: {len(text)} characters")
             else:
                 # For Excel and other files, parse and convert to text
                 print(f"[PROCESSING STEP] Step 1: Parsing file (Excel/other)")
-                parsed = parser.parse(file_path)
+                parsed = await asyncio.to_thread(parser.parse, file_path)
                 
                 # Convert parsed data to text
                 text_parts = []
@@ -353,7 +358,6 @@ async def process_document_task(task: ProcessingTask) -> dict:
             
             if retry_count < max_retries:
                 # Wait before retrying (exponential backoff)
-                import asyncio
                 await asyncio.sleep(2 ** retry_count)
                 continue
             else:
@@ -479,7 +483,7 @@ async def ensure_queue_started(queue: ProcessingQueue):
 def get_processing_queue(client_id: str) -> ProcessingQueue:
     """Get or create processing queue for a client"""
     if client_id not in _processing_queues:
-        queue = ProcessingQueue(max_workers=3)
+        queue = ProcessingQueue(max_workers=1)
         queue.set_processor(process_document_task)
         _processing_queues[client_id] = queue
     

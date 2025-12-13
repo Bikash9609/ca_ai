@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Card, CardBody, CardHeader, Button } from "@heroui/react";
 import { useWorkspace } from "../hooks/useWorkspace";
 
 export default function Dashboard() {
@@ -39,66 +40,94 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
 
       {/* Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="text-sm text-gray-500 mb-1">Total Clients</div>
-          <div className="text-3xl font-bold">{stats.totalClients}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="text-sm text-gray-500 mb-1">Documents Processed</div>
-          <div className="text-3xl font-bold">{stats.documentsProcessed}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="text-sm text-gray-500 mb-1">Time Saved</div>
-          <div className="text-3xl font-bold">{stats.timeSaved} hrs</div>
-        </div>
+        <Card classNames={{ base: "border border-default-200" }}>
+          <CardBody>
+            <div className="text-sm text-default-500 mb-1">Total Clients</div>
+            <div className="text-3xl font-bold text-foreground">
+              {stats.totalClients}
+            </div>
+          </CardBody>
+        </Card>
+        <Card classNames={{ base: "border border-default-200" }}>
+          <CardBody>
+            <div className="text-sm text-default-500 mb-1">
+              Documents Processed
+            </div>
+            <div className="text-3xl font-bold text-foreground">
+              {stats.documentsProcessed}
+            </div>
+          </CardBody>
+        </Card>
+        <Card classNames={{ base: "border border-default-200" }}>
+          <CardBody>
+            <div className="text-sm text-default-500 mb-1">Time Saved</div>
+            <div className="text-3xl font-bold text-foreground">
+              {stats.timeSaved} hrs
+            </div>
+          </CardBody>
+        </Card>
       </div>
 
       {/* Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Documents */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">Recent Documents</h2>
-          <div className="space-y-2">
-            <div className="text-sm text-gray-500 text-center py-4">
+        <Card classNames={{ base: "border border-default-200" }}>
+          <CardHeader>
+            <h2 className="text-lg font-semibold text-foreground">
+              Recent Documents
+            </h2>
+          </CardHeader>
+          <CardBody>
+            <div className="text-sm text-default-500 text-center py-4">
               No recent documents
             </div>
-          </div>
-        </div>
+          </CardBody>
+        </Card>
 
         {/* Recent Conversations */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">Recent Conversations</h2>
-          <div className="space-y-2">
-            <div className="text-sm text-gray-500 text-center py-4">
+        <Card classNames={{ base: "border border-default-200" }}>
+          <CardHeader>
+            <h2 className="text-lg font-semibold text-foreground">
+              Recent Conversations
+            </h2>
+          </CardHeader>
+          <CardBody>
+            <div className="text-sm text-default-500 text-center py-4">
               No recent conversations
             </div>
-          </div>
-        </div>
+          </CardBody>
+        </Card>
       </div>
 
       {/* Quick Actions */}
       {currentClient && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <button className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-              Upload Documents
-            </button>
-            <button className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
-              Start Chat
-            </button>
-            <button className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700">
-              GST Filing
-            </button>
-            <button className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">
-              View Reports
-            </button>
-          </div>
-        </div>
+        <Card classNames={{ base: "border border-default-200" }}>
+          <CardHeader>
+            <h2 className="text-lg font-semibold text-foreground">
+              Quick Actions
+            </h2>
+          </CardHeader>
+          <CardBody>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Button color="primary" className="w-full">
+                Upload Documents
+              </Button>
+              <Button color="success" className="w-full">
+                Start Chat
+              </Button>
+              <Button color="secondary" className="w-full">
+                GST Filing
+              </Button>
+              <Button color="warning" className="w-full">
+                View Reports
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
       )}
     </div>
   );

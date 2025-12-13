@@ -1,4 +1,14 @@
 import { useState, useEffect, useRef } from "react";
+import {
+  Select,
+  SelectItem,
+  Input,
+  Textarea,
+  Button,
+  Card,
+  CardBody,
+  Spinner,
+} from "@heroui/react";
 import { useWorkspace } from "../hooks/useWorkspace";
 
 interface Message {
@@ -221,7 +231,7 @@ export default function Chat() {
   if (!currentClient) {
     return (
       <div className="p-6">
-        <div className="text-center text-gray-500">
+        <div className="text-center text-default-500">
           Please select a client to start chatting
         </div>
       </div>
@@ -231,53 +241,59 @@ export default function Chat() {
   return (
     <div className="flex flex-col h-screen">
       {/* Header */}
-      <div className="border-b bg-white p-4">
+      <div className="border-b border-default-200 bg-background p-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">Chat Assistant</h1>
+          <h1 className="text-xl font-semibold text-foreground">
+            Chat Assistant
+          </h1>
           <div className="flex items-center gap-4">
-            <select
-              value={provider}
-              onChange={(e) =>
-                setProvider(
-                  e.target.value as
-                    | "claude"
-                    | "ollama"
-                    | "gemini"
-                    | "groq"
-                    | "openrouter"
-                )
-              }
-              className="px-3 py-1 border rounded"
+            <Select
+              selectedKeys={[provider]}
+              onSelectionChange={(keys) => {
+                const selected = Array.from(keys)[0] as string;
+                setProvider(selected as typeof provider);
+              }}
+              className="w-40"
+              classNames={{
+                base: "w-40",
+              }}
             >
-              <option value="claude">Claude</option>
-              <option value="ollama">Ollama</option>
-              <option value="gemini">Gemini</option>
-              <option value="groq">Groq</option>
-              <option value="openrouter">OpenRouter</option>
-            </select>
+              <SelectItem key="claude" value="claude">
+                Claude
+              </SelectItem>
+              <SelectItem key="ollama" value="ollama">
+                Ollama
+              </SelectItem>
+              <SelectItem key="gemini" value="gemini">
+                Gemini
+              </SelectItem>
+              <SelectItem key="groq" value="groq">
+                Groq
+              </SelectItem>
+              <SelectItem key="openrouter" value="openrouter">
+                OpenRouter
+              </SelectItem>
+            </Select>
             {provider !== "ollama" && (
-              <input
+              <Input
                 type="password"
                 placeholder={`API Key${
                   provider === "claude" ? " (optional)" : ""
                 }`}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                className="px-3 py-1 border rounded w-48"
+                className="w-48"
+                classNames={{
+                  base: "w-48",
+                }}
               />
             )}
-            <button
-              onClick={clearHistory}
-              className="px-3 py-1 text-sm border rounded hover:bg-gray-50"
-            >
+            <Button size="sm" variant="flat" onPress={clearHistory}>
               Clear
-            </button>
-            <button
-              onClick={exportConversation}
-              className="px-3 py-1 text-sm border rounded hover:bg-gray-50"
-            >
+            </Button>
+            <Button size="sm" variant="flat" onPress={exportConversation}>
               Export
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -285,7 +301,7 @@ export default function Chat() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
-          <div className="text-center text-gray-500 mt-8">
+          <div className="text-center text-default-500 mt-8">
             Start a conversation by asking a question about GST compliance
           </div>
         )}
@@ -293,8 +309,8 @@ export default function Chat() {
           <MessageBubble key={message.id} message={message} />
         ))}
         {loading && (
-          <div className="flex items-center gap-2 text-gray-500">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+          <div className="flex items-center gap-2 text-default-500">
+            <Spinner size="sm" color="primary" />
             <span>Thinking...</span>
           </div>
         )}
@@ -303,51 +319,56 @@ export default function Chat() {
 
       {/* Error Display */}
       {error && (
-        <div className="bg-red-50 border-l-4 border-red-500 p-4 mx-4 mb-2">
-          <div className="flex items-center justify-between">
-            <div className="text-red-700">{error}</div>
-            <button
-              onClick={() => setError(null)}
-              className="text-red-500 hover:text-red-700"
-            >
-              ×
-            </button>
-          </div>
-        </div>
+        <Card
+          className="mx-4 mb-2 border-l-4 border-l-danger"
+          classNames={{ base: "bg-danger-50 border-l-4 border-l-danger" }}
+        >
+          <CardBody>
+            <div className="flex items-center justify-between">
+              <div className="text-danger-700">{error}</div>
+              <Button
+                size="sm"
+                variant="light"
+                isIconOnly
+                onPress={() => setError(null)}
+              >
+                ×
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
       )}
 
       {/* Input Area */}
-      <div className="border-t bg-white p-4">
+      <div className="border-t border-default-200 bg-background p-4">
         <div className="flex gap-2">
-          <textarea
+          <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Ask a question about GST compliance..."
-            className="flex-1 px-4 py-2 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-            rows={3}
-            disabled={loading}
+            className="flex-1"
+            minRows={3}
+            isDisabled={loading}
           />
           <div className="flex flex-col gap-2">
             {loading ? (
-              <button
-                onClick={handleCancel}
-                className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-              >
+              <Button color="danger" onPress={handleCancel} className="h-full">
                 Cancel
-              </button>
+              </Button>
             ) : (
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || loading}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              <Button
+                color="primary"
+                onPress={handleSend}
+                isDisabled={!input.trim() || loading}
+                className="h-full"
               >
                 Send
-              </button>
+              </Button>
             )}
           </div>
         </div>
-        <div className="text-xs text-gray-500 mt-2">
+        <div className="text-xs text-default-500 mt-2">
           Press Enter to send, Shift+Enter for new line
         </div>
       </div>
@@ -360,35 +381,56 @@ function MessageBubble({ message }: { message: Message }) {
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-3xl rounded-lg p-4 ${
-          isUser ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-900"
+      <Card
+        className={`max-w-3xl ${
+          isUser
+            ? "bg-primary text-primary-foreground"
+            : "bg-default-100 text-foreground"
         }`}
+        classNames={{
+          base: `max-w-3xl border border-default-200 ${
+            isUser
+              ? "bg-primary text-primary-foreground"
+              : "bg-default-100 text-foreground"
+          }`,
+        }}
       >
-        {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="mb-2 space-y-1">
-            {message.toolCalls.map((toolCall, idx) => (
-              <div
-                key={idx}
-                className="text-xs bg-white bg-opacity-20 rounded px-2 py-1"
-              >
-                🔧 {toolCall.tool}
-              </div>
-            ))}
+        <CardBody className="p-4">
+          {message.toolCalls && message.toolCalls.length > 0 && (
+            <div className="mb-2 space-y-1">
+              {message.toolCalls.map((toolCall, idx) => (
+                <div
+                  key={idx}
+                  className={`text-xs rounded px-2 py-1 ${
+                    isUser ? "bg-white bg-opacity-20" : "bg-default-200"
+                  }`}
+                >
+                  🔧 {toolCall.tool}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="whitespace-pre-wrap">
+            <MarkdownRenderer content={message.content} />
           </div>
-        )}
-        <div className="whitespace-pre-wrap">
-          <MarkdownRenderer content={message.content} />
-        </div>
-        {message.error && (
-          <div className="mt-2 text-red-300 text-sm">
-            Error: {message.error}
+          {message.error && (
+            <div
+              className={`mt-2 text-sm ${
+                isUser ? "text-red-200" : "text-danger"
+              }`}
+            >
+              Error: {message.error}
+            </div>
+          )}
+          <div
+            className={`text-xs mt-2 ${
+              isUser ? "opacity-70" : "text-default-500"
+            }`}
+          >
+            {message.timestamp.toLocaleTimeString()}
           </div>
-        )}
-        <div className="text-xs opacity-70 mt-2">
-          {message.timestamp.toLocaleTimeString()}
-        </div>
-      </div>
+        </CardBody>
+      </Card>
     </div>
   );
 }

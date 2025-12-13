@@ -1,4 +1,22 @@
 import { useState, useEffect } from "react";
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  Tabs,
+  Tab,
+  Input,
+  Select,
+  SelectItem,
+  Button,
+  Table,
+  TableHeader,
+  TableColumn,
+  TableBody,
+  TableRow,
+  TableCell,
+  Chip,
+} from "@heroui/react";
 import { useWorkspace } from "../hooks/useWorkspace";
 
 interface PrivacyStats {
@@ -100,159 +118,168 @@ export default function Privacy() {
 
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">Privacy & Security</h1>
+      <h1 className="text-2xl font-bold mb-6 text-foreground">
+        Privacy & Security
+      </h1>
 
       {/* Tabs */}
-      <div className="border-b mb-6">
-        <nav className="flex space-x-4">
-          <button
-            onClick={() => setActiveTab("dashboard")}
-            className={`py-2 px-4 border-b-2 ${
-              activeTab === "dashboard"
-                ? "border-blue-500 text-blue-600"
-                : "border-transparent text-gray-500"
-            }`}
-          >
-            Dashboard
-          </button>
-          <button
-            onClick={() => setActiveTab("logs")}
-            className={`py-2 px-4 border-b-2 ${
-              activeTab === "logs"
-                ? "border-blue-500 text-blue-600"
-                : "border-transparent text-gray-500"
-            }`}
-          >
-            Audit Logs
-          </button>
-          <button
-            onClick={() => setActiveTab("data")}
-            className={`py-2 px-4 border-b-2 ${
-              activeTab === "data"
-                ? "border-blue-500 text-blue-600"
-                : "border-transparent text-gray-500"
-            }`}
-          >
-            Data Management
-          </button>
-        </nav>
-      </div>
+      <Tabs
+        selectedKey={activeTab}
+        onSelectionChange={(key) => setActiveTab(key as typeof activeTab)}
+        classNames={{
+          base: "mb-6",
+        }}
+      >
+        <Tab key="dashboard" title="Dashboard" />
+        <Tab key="logs" title="Audit Logs" />
+        <Tab key="data" title="Data Management" />
+      </Tabs>
 
       {/* Dashboard Tab */}
       {activeTab === "dashboard" && (
         <div className="space-y-6">
           {/* Access Summary */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Access Summary</h2>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <div className="text-sm text-gray-500">Total Queries</div>
-                <div className="text-2xl font-bold">
-                  {privacyStats?.total_queries || 0}
+          <Card classNames={{ base: "border border-default-200" }}>
+            <CardHeader>
+              <h2 className="text-xl font-semibold text-foreground">
+                Access Summary
+              </h2>
+            </CardHeader>
+            <CardBody>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <div className="text-sm text-default-500">Total Queries</div>
+                  <div className="text-2xl font-bold text-foreground">
+                    {privacyStats?.total_queries || 0}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-default-500">Data Shared</div>
+                  <div className="text-2xl font-bold text-foreground">
+                    {formatBytes(privacyStats?.total_data_shared_bytes || 0)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-default-500">Tools Used</div>
+                  <div className="text-2xl font-bold text-foreground">
+                    {Object.keys(usageStats?.tool_usage || {}).length}
+                  </div>
                 </div>
               </div>
-              <div>
-                <div className="text-sm text-gray-500">Data Shared</div>
-                <div className="text-2xl font-bold">
-                  {formatBytes(privacyStats?.total_data_shared_bytes || 0)}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500">Tools Used</div>
-                <div className="text-2xl font-bold">
-                  {Object.keys(usageStats?.tool_usage || {}).length}
-                </div>
-              </div>
-            </div>
-          </div>
+            </CardBody>
+          </Card>
 
           {/* Security Status */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Security Status</h2>
-            <div className="space-y-3">
+          <Card classNames={{ base: "border border-default-200" }}>
+            <CardHeader>
+              <h2 className="text-xl font-semibold text-foreground">
+                Security Status
+              </h2>
+            </CardHeader>
+            <CardBody className="space-y-3">
               <div className="flex items-center justify-between">
-                <span>Firewall Active</span>
-                <span className="text-green-600 font-semibold">✓ Active</span>
+                <span className="text-foreground">Firewall Active</span>
+                <Chip color="success">✓ Active</Chip>
               </div>
               <div className="flex items-center justify-between">
-                <span>File Access</span>
-                <span className="text-green-600 font-semibold">✓ Blocked</span>
+                <span className="text-foreground">File Access</span>
+                <Chip color="success">✓ Blocked</Chip>
               </div>
               <div className="flex items-center justify-between">
-                <span>All Interactions Logged</span>
-                <span className="text-green-600 font-semibold">✓ Yes</span>
+                <span className="text-foreground">All Interactions Logged</span>
+                <Chip color="success">✓ Yes</Chip>
               </div>
               {securityMonitoring &&
                 securityMonitoring.total_violations > 0 && (
                   <div className="flex items-center justify-between">
-                    <span>Security Violations</span>
-                    <span className="text-red-600 font-semibold">
+                    <span className="text-foreground">Security Violations</span>
+                    <Chip color="danger">
                       {securityMonitoring.total_violations} detected
-                    </span>
+                    </Chip>
                   </div>
                 )}
-            </div>
-          </div>
+            </CardBody>
+          </Card>
 
           {/* Recent Interactions */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Recent Interactions</h2>
-            <div className="space-y-2">
-              {privacyStats?.recent_interactions
-                .slice(0, 10)
-                .map((interaction, idx) => (
-                  <div
-                    key={idx}
-                    className="flex justify-between items-center py-2 border-b"
-                  >
-                    <div>
-                      <div className="font-medium">{interaction.tool_name}</div>
-                      <div className="text-sm text-gray-500">
-                        {new Date(interaction.timestamp).toLocaleString()}
+          <Card classNames={{ base: "border border-default-200" }}>
+            <CardHeader>
+              <h2 className="text-xl font-semibold text-foreground">
+                Recent Interactions
+              </h2>
+            </CardHeader>
+            <CardBody>
+              <div className="space-y-2">
+                {privacyStats?.recent_interactions
+                  .slice(0, 10)
+                  .map((interaction, idx) => (
+                    <div
+                      key={idx}
+                      className="flex justify-between items-center py-2 border-b border-default-200"
+                    >
+                      <div>
+                        <div className="font-medium text-foreground">
+                          {interaction.tool_name}
+                        </div>
+                        <div className="text-sm text-default-500">
+                          {new Date(interaction.timestamp).toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="text-sm text-default-600">
+                        {formatBytes(interaction.result_size_bytes)}
                       </div>
                     </div>
-                    <div className="text-sm text-gray-600">
-                      {formatBytes(interaction.result_size_bytes)}
-                    </div>
-                  </div>
-                ))}
-              {(!privacyStats?.recent_interactions ||
-                privacyStats.recent_interactions.length === 0) && (
-                <div className="text-gray-500 text-center py-4">
-                  No interactions yet
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Usage Statistics */}
-          {usageStats && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-xl font-semibold mb-4">Usage Statistics</h2>
-              <div className="space-y-4">
-                <div>
-                  <div className="text-sm text-gray-500 mb-2">Tool Usage</div>
-                  <div className="space-y-1">
-                    {Object.entries(usageStats.tool_usage).map(
-                      ([tool, count]) => (
-                        <div key={tool} className="flex justify-between">
-                          <span>{tool}</span>
-                          <span className="font-medium">{count}</span>
-                        </div>
-                      )
-                    )}
-                  </div>
-                </div>
-                {usageStats.peak_usage_day && (
-                  <div>
-                    <div className="text-sm text-gray-500">Peak Usage Day</div>
-                    <div className="font-medium">
-                      {usageStats.peak_usage_day}
-                    </div>
+                  ))}
+                {(!privacyStats?.recent_interactions ||
+                  privacyStats.recent_interactions.length === 0) && (
+                  <div className="text-default-500 text-center py-4">
+                    No interactions yet
                   </div>
                 )}
               </div>
-            </div>
+            </CardBody>
+          </Card>
+
+          {/* Usage Statistics */}
+          {usageStats && (
+            <Card classNames={{ base: "border border-default-200" }}>
+              <CardHeader>
+                <h2 className="text-xl font-semibold text-foreground">
+                  Usage Statistics
+                </h2>
+              </CardHeader>
+              <CardBody>
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-sm text-default-500 mb-2">
+                      Tool Usage
+                    </div>
+                    <div className="space-y-1">
+                      {Object.entries(usageStats.tool_usage).map(
+                        ([tool, count]) => (
+                          <div key={tool} className="flex justify-between">
+                            <span className="text-foreground">{tool}</span>
+                            <span className="font-medium text-foreground">
+                              {count}
+                            </span>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                  {usageStats.peak_usage_day && (
+                    <div>
+                      <div className="text-sm text-default-500">
+                        Peak Usage Day
+                      </div>
+                      <div className="font-medium text-foreground">
+                        {usageStats.peak_usage_day}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardBody>
+            </Card>
           )}
         </div>
       )}
@@ -347,94 +374,77 @@ function AuditLogViewer({ clientId }: { clientId?: string }) {
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="bg-white rounded-lg shadow p-4">
-        <div className="flex gap-4 items-end">
-          <div className="flex-1">
-            <label className="block text-sm font-medium mb-1">Search</label>
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search logs..."
-              className="w-full px-3 py-2 border rounded"
-            />
+      <Card classNames={{ base: "border border-default-200" }}>
+        <CardBody>
+          <div className="flex gap-4 items-end">
+            <div className="flex-1">
+              <Input
+                type="text"
+                label="Search"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search logs..."
+              />
+            </div>
+            <div>
+              <Select
+                label="Filter by Tool"
+                selectedKeys={[filterTool]}
+                onSelectionChange={(keys) => {
+                  const selected = Array.from(keys)[0] as string;
+                  setFilterTool(selected);
+                }}
+              >
+                <SelectItem key="all">All Tools</SelectItem>
+                {uniqueTools.map((tool) => (
+                  <SelectItem key={tool} value={tool}>
+                    {tool}
+                  </SelectItem>
+                ))}
+              </Select>
+            </div>
+            <Button color="primary" onPress={exportLogs}>
+              Export Logs
+            </Button>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Filter by Tool
-            </label>
-            <select
-              value={filterTool}
-              onChange={(e) => setFilterTool(e.target.value)}
-              className="px-3 py-2 border rounded"
-            >
-              <option value="all">All Tools</option>
-              {uniqueTools.map((tool) => (
-                <option key={tool} value={tool}>
-                  {tool}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            onClick={exportLogs}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            Export Logs
-          </button>
-        </div>
-      </div>
+        </CardBody>
+      </Card>
 
       {/* Log List */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Timestamp
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Tool
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Data Size
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Status
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {filteredLogs.map((log, idx) => (
-                <tr key={idx} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-sm">
-                    {new Date(log.timestamp).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-sm font-medium">
-                    {log.tool_name || "N/A"}
-                  </td>
-                  <td className="px-4 py-3 text-sm">
-                    {log.result_size_bytes
-                      ? `${(log.result_size_bytes / 1024).toFixed(2)} KB`
-                      : "N/A"}
-                  </td>
-                  <td className="px-4 py-3 text-sm">
-                    {log.violation ? (
-                      <span className="text-red-600">Violation</span>
-                    ) : (
-                      <span className="text-green-600">Allowed</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {filteredLogs.length === 0 && (
-          <div className="text-center py-8 text-gray-500">No logs found</div>
-        )}
-      </div>
+      <Card classNames={{ base: "border border-default-200" }}>
+        <Table aria-label="Audit logs table">
+          <TableHeader>
+            <TableColumn>Timestamp</TableColumn>
+            <TableColumn>Tool</TableColumn>
+            <TableColumn>Data Size</TableColumn>
+            <TableColumn>Status</TableColumn>
+          </TableHeader>
+          <TableBody emptyContent="No logs found">
+            {filteredLogs.map((log, idx) => (
+              <TableRow key={idx}>
+                <TableCell>
+                  {new Date(log.timestamp).toLocaleString()}
+                </TableCell>
+                <TableCell className="font-medium">
+                  {log.tool_name || "N/A"}
+                </TableCell>
+                <TableCell>
+                  {log.result_size_bytes
+                    ? `${(log.result_size_bytes / 1024).toFixed(2)} KB`
+                    : "N/A"}
+                </TableCell>
+                <TableCell>
+                  {log.violation ? (
+                    <Chip color="danger">Violation</Chip>
+                  ) : (
+                    <Chip color="success">Allowed</Chip>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
     </div>
   );
 }
@@ -483,68 +493,83 @@ function DataManagement({ clientId }: { clientId?: string }) {
   return (
     <div className="space-y-6">
       {/* Workspace Info */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold mb-4">Workspace Information</h2>
-        <div className="space-y-3">
-          <div>
-            <div className="text-sm text-gray-500">Location</div>
-            <div className="font-mono text-sm">
-              {workspaceInfo?.path || "N/A"}
+      <Card classNames={{ base: "border border-default-200" }}>
+        <CardHeader>
+          <h2 className="text-xl font-semibold text-foreground">
+            Workspace Information
+          </h2>
+        </CardHeader>
+        <CardBody>
+          <div className="space-y-3">
+            <div>
+              <div className="text-sm text-default-500">Location</div>
+              <div className="font-mono text-sm text-foreground">
+                {workspaceInfo?.path || "N/A"}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-default-500">Total Size</div>
+              <div className="text-lg font-semibold text-foreground">
+                {workspaceInfo ? formatBytes(workspaceInfo.size_bytes) : "N/A"}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-default-500">File Count</div>
+              <div className="text-lg font-semibold text-foreground">
+                {workspaceInfo?.file_count || 0} files
+              </div>
             </div>
           </div>
-          <div>
-            <div className="text-sm text-gray-500">Total Size</div>
-            <div className="text-lg font-semibold">
-              {workspaceInfo ? formatBytes(workspaceInfo.size_bytes) : "N/A"}
-            </div>
-          </div>
-          <div>
-            <div className="text-sm text-gray-500">File Count</div>
-            <div className="text-lg font-semibold">
-              {workspaceInfo?.file_count || 0} files
-            </div>
-          </div>
-        </div>
-      </div>
+        </CardBody>
+      </Card>
 
       {/* Export Options */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold mb-4">Export Data</h2>
-        <div className="space-y-3">
-          <button className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-            Export Workspace as ZIP
-          </button>
-          <button className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-            Export Processed Data
-          </button>
-          <button className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-            Export Audit Logs
-          </button>
-        </div>
-      </div>
+      <Card classNames={{ base: "border border-default-200" }}>
+        <CardHeader>
+          <h2 className="text-xl font-semibold text-foreground">Export Data</h2>
+        </CardHeader>
+        <CardBody>
+          <div className="space-y-3">
+            <Button color="primary" className="w-full">
+              Export Workspace as ZIP
+            </Button>
+            <Button color="primary" className="w-full">
+              Export Processed Data
+            </Button>
+            <Button color="primary" className="w-full">
+              Export Audit Logs
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
 
       {/* Deletion Options */}
-      <div className="bg-white rounded-lg shadow p-6 border-l-4 border-red-500">
-        <h2 className="text-xl font-semibold mb-4 text-red-600">Danger Zone</h2>
-        <div className="space-y-3">
-          <div>
-            <p className="text-sm text-gray-600 mb-2">
-              Permanently delete client data. This action cannot be undone.
-            </p>
-            <button className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
-              Delete Client Data
-            </button>
+      <Card
+        classNames={{
+          base: "border-l-4 border-l-danger border border-default-200",
+        }}
+      >
+        <CardHeader>
+          <h2 className="text-xl font-semibold text-danger">Danger Zone</h2>
+        </CardHeader>
+        <CardBody>
+          <div className="space-y-3">
+            <div>
+              <p className="text-sm text-default-600 mb-2">
+                Permanently delete client data. This action cannot be undone.
+              </p>
+              <Button color="danger">Delete Client Data</Button>
+            </div>
+            <div>
+              <p className="text-sm text-default-600 mb-2">
+                Permanently delete entire workspace. This action cannot be
+                undone.
+              </p>
+              <Button color="danger">Delete Workspace</Button>
+            </div>
           </div>
-          <div>
-            <p className="text-sm text-gray-600 mb-2">
-              Permanently delete entire workspace. This action cannot be undone.
-            </p>
-            <button className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
-              Delete Workspace
-            </button>
-          </div>
-        </div>
-      </div>
+        </CardBody>
+      </Card>
     </div>
   );
 }

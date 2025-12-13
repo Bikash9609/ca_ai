@@ -1,5 +1,5 @@
 """
-LLM Service - Claude API integration with context firewall
+LLM Service - Unified multi-provider LLM integration with context firewall using LiteLLM
 """
 
 import os
@@ -9,43 +9,15 @@ os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
 import json
 import logging
-import asyncio
 from typing import Dict, Any, List, Optional, AsyncGenerator
 from enum import Enum
 
 try:
-    from anthropic import Anthropic, AsyncAnthropic
-    ANTHROPIC_AVAILABLE = True
+    import litellm
+    LITELLM_AVAILABLE = True
 except ImportError:
-    ANTHROPIC_AVAILABLE = False
-    AsyncAnthropic = None
-
-try:
-    import httpx
-    HTTPX_AVAILABLE = True
-except ImportError:
-    HTTPX_AVAILABLE = False
-
-try:
-    from google import genai as google_genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-    google_genai = None
-
-try:
-    from groq import AsyncGroq
-    GROQ_AVAILABLE = True
-except ImportError:
-    GROQ_AVAILABLE = False
-    AsyncGroq = None
-
-try:
-    from openai import AsyncOpenAI
-    OPENROUTER_AVAILABLE = True
-except ImportError:
-    OPENROUTER_AVAILABLE = False
-    AsyncOpenAI = None
+    LITELLM_AVAILABLE = False
+    litellm = None
 
 from core.firewall import ContextFirewall
 from core.tools import ToolExecutor
@@ -65,7 +37,7 @@ class LLMProvider(Enum):
 
 
 class LLMService:
-    """Main LLM service with context firewall integration"""
+    """Main LLM service with context firewall integration using LiteLLM"""
     
     def __init__(
         self,
@@ -82,56 +54,21 @@ class LLMService:
             firewall: Context firewall instance
             tool_executor: Tool executor instance
             audit_logger: Optional audit logger
-            api_key: API key for Claude (or from env)
+            api_key: API key (provider-specific, or from env)
             provider: LLM provider to use
         """
+        if not LITELLM_AVAILABLE:
+            raise ImportError("litellm is required. Install with: uv pip install litellm")
+        
         self.firewall = firewall
         self.tool_executor = tool_executor
         self.audit_logger = audit_logger
         self.provider = provider
         
-        # Initialize Claude client if available
-        if provider == LLMProvider.CLAUDE and ANTHROPIC_AVAILABLE:
-            self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-            if self.api_key:
-                self.client = AsyncAnthropic(api_key=self.api_key)
-            else:
-                logger.warning("No Anthropic API key provided. Claude integration disabled.")
-                self.client = None
-        elif provider == LLMProvider.OLLAMA:
-            self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-            self.ollama_model = os.getenv("OLLAMA_MODEL", "llama2")
-            self.client = None  # Ollama uses HTTP directly
-        elif provider == LLMProvider.GEMINI and GEMINI_AVAILABLE:
-            self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-            if self.api_key:
-                # Use sync client, will run in thread for async operations
-                self.client = google_genai.Client(api_key=self.api_key)
-                self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-            else:
-                logger.warning("No Gemini API key provided. Gemini integration disabled.")
-                self.client = None
-        elif provider == LLMProvider.GROQ and GROQ_AVAILABLE:
-            self.api_key = api_key or os.getenv("GROQ_API_KEY")
-            if self.api_key:
-                self.client = AsyncGroq(api_key=self.api_key)
-                self.groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-            else:
-                logger.warning("No Groq API key provided. Groq integration disabled.")
-                self.client = None
-        elif provider == LLMProvider.OPENROUTER and OPENROUTER_AVAILABLE:
-            self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
-            if self.api_key:
-                self.client = AsyncOpenAI(
-                    base_url="https://openrouter.ai/api/v1",
-                    api_key=self.api_key
-                )
-                self.openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")
-            else:
-                logger.warning("No OpenRouter API key provided. OpenRouter integration disabled.")
-                self.client = None
-        else:
-            self.client = None
+        # Get provider-specific API key and model name
+        self.api_key = api_key or self._get_api_key_for_provider()
+        self.model_name = self._get_litellm_model_name()
+        self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434") if provider == LLMProvider.OLLAMA else None
         
         # Conversation history
         self.conversation_history: List[Dict[str, Any]] = []
@@ -139,167 +76,405 @@ class LLMService:
         # System prompt
         self.system_prompt = self._build_system_prompt()
     
+    def _get_api_key_for_provider(self) -> Optional[str]:
+        """Get API key for the current provider from environment"""
+        if self.provider == LLMProvider.CLAUDE:
+            return os.getenv("ANTHROPIC_API_KEY")
+        elif self.provider == LLMProvider.GEMINI:
+            return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        elif self.provider == LLMProvider.GROQ:
+            return os.getenv("GROQ_API_KEY")
+        elif self.provider == LLMProvider.OPENROUTER:
+            return os.getenv("OPENROUTER_API_KEY")
+        elif self.provider == LLMProvider.OLLAMA:
+            return None  # Ollama doesn't need API key
+        return None
+    
+    def _get_litellm_model_name(self) -> str:
+        """Map provider to LiteLLM model name"""
+        if self.provider == LLMProvider.CLAUDE:
+            return os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
+        elif self.provider == LLMProvider.GEMINI:
+            model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            return f"gemini/{model}"
+        elif self.provider == LLMProvider.GROQ:
+            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+            return f"groq/{model}"
+        elif self.provider == LLMProvider.OPENROUTER:
+            model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")
+            return f"openrouter/{model}"
+        elif self.provider == LLMProvider.OLLAMA:
+            model = os.getenv("OLLAMA_MODEL", "llama2")
+            return f"ollama/{model}"
+        else:
+            return "gpt-3.5-turbo"  # Default fallback
+    
     def _build_system_prompt(self) -> str:
         """Build system prompt for CA assistant"""
         return """
-        You are a CA's AI assistant for GST compliance and financial analysis.
+        You are a CA's AI assistant for GST and TDS compliance and financial analysis.
 
 CORE PROTOCOL:
 1. MANDATORY: Call tools to retrieve data BEFORE answering. Never simulate actions.
-2. NO MANUAL MATH: Use `get_summary` for all tax/ITC calculations.
+2. NO MANUAL MATH: Use `get_summary` or `get_tds_summary` for all tax/ITC/TDS calculations.
 3. READ-ONLY: You cannot see files, modify data, or save externally.
 4. ADVISORY ONLY: CA must approve all actions.
 
-TOOLS:
+TOOLS (GST):
 - search_documents(query, doc_type, period)
 - get_invoice(invoice_number, vendor_name)
-- get_summary(summary_type, period, category) -> PRIMARY for calc
+- get_summary(summary_type, period, category) -> PRIMARY for GST calc
 - get_reconciliation(source1, source2, period)
 - search_gst_rules(query, category, limit)
 - explain_rule(rule_type, scenario)
+
+TOOLS (TDS):
+- get_tds_certificate(certificate_number, deductor_name, period, form_type)
+- get_tds_summary(summary_type, period, section, deductee_pan) -> PRIMARY for TDS calc
+- get_tds_reconciliation(source1, source2, period, form_type)
+- search_tds_rules(query, section, category, limit)
+- explain_tds_rule(section, scenario)
+- get_tds_return_status(return_type, period, quarter)
 
 CONTEXT (INDIAN GST):
 - ITC requires GSTR-1 filing (Rule 36(4) blocks ITC if missing from GSTR-2B).
 - Sec 17(5) defines blocked credits.
 - Deadlines: GSTR-1 (11th), GSTR-3B (20th).
 
-EXAMPLE FLOW:
-User: "Why is ITC blocked?"
-Action: Call `get_summary("itc_summary", ...)`
-Result: See Rule 36(4) flag.
-Reply: "Blocked due to vendor non-filing (Rule 36(4))." 
+CONTEXT (INDIAN TDS):
+- Common sections: 194A (Interest), 194C (Contractors), 194H (Commission), 194I (Rent), 194J (Professional fees), 194LA (Immovable property).
+- TDS deposit deadline: 7th of next month.
+- TDS return filing: 24Q (Salary), 26Q (Non-Salary), 27Q (NRI), 27EQ (TCS).
+- Certificate deadlines: Form 16 (15th May), Form 16A (15 days from request).
+- Rates vary by section and threshold amounts.
+
+EXAMPLE FLOWS:
+GST: User: "Why is ITC blocked?"
+     Action: Call `get_summary("itc_summary", ...)`
+     Result: See Rule 36(4) flag.
+     Reply: "Blocked due to vendor non-filing (Rule 36(4))."
+
+TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
+     Action: Call `get_tds_summary(summary_type="section_wise", period="2024-Q1", section="194A")`
+     Result: Returns aggregated TDS data.
+     Reply: "Total TDS deducted under section 194A for Q1 2024 is ₹X from Y certificates."
 """
+    
     def _get_tool_definitions(self) -> List[Dict[str, Any]]:
-        """Get tool definitions for Claude"""
+        """Get tool definitions in OpenAI format (LiteLLM standard)"""
         return [
             {
-                "name": "search_documents",
-                "description": "Search documents using semantic and keyword search",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query"
+                "type": "function",
+                "function": {
+                    "name": "search_documents",
+                    "description": "Search documents using semantic and keyword search",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query"
+                            },
+                            "doc_type": {
+                                "type": "string",
+                                "description": "Document type filter (optional)"
+                            },
+                            "period": {
+                                "type": "string",
+                                "description": "Period filter (optional, format: YYYY-MM)"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum number of results",
+                                "default": 20
+                            }
                         },
-                        "doc_type": {
-                            "type": "string",
-                            "description": "Document type filter (optional)"
-                        },
-                        "period": {
-                            "type": "string",
-                            "description": "Period filter (optional, format: YYYY-MM)"
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of results",
-                            "default": 20
-                        }
-                    },
-                    "required": ["query"]
+                        "required": ["query"]
+                    }
                 }
             },
             {
-                "name": "get_invoice",
-                "description": "Get structured invoice data by invoice number or vendor",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "invoice_number": {
-                            "type": "string",
-                            "description": "Invoice number (optional)"
-                        },
-                        "vendor_name": {
-                            "type": "string",
-                            "description": "Vendor name (optional)"
+                "type": "function",
+                "function": {
+                    "name": "get_invoice",
+                    "description": "Get structured invoice data by invoice number or vendor",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "invoice_number": {
+                                "type": "string",
+                                "description": "Invoice number (optional)"
+                            },
+                            "vendor_name": {
+                                "type": "string",
+                                "description": "Vendor name (optional)"
+                            }
                         }
                     }
                 }
             },
             {
-                "name": "get_summary",
-                "description": "Get aggregated summary statistics",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "summary_type": {
-                            "type": "string",
-                            "enum": ["sales_total", "purchase_total", "gst_liability", "itc_summary", "vendor_count"],
-                            "description": "Type of summary to retrieve"
+                "type": "function",
+                "function": {
+                    "name": "get_summary",
+                    "description": "Get aggregated summary statistics",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "summary_type": {
+                                "type": "string",
+                                "enum": ["sales_total", "purchase_total", "gst_liability", "itc_summary", "vendor_count"],
+                                "description": "Type of summary to retrieve"
+                            },
+                            "period": {
+                                "type": "string",
+                                "description": "Period (format: YYYY-MM)"
+                            },
+                            "category": {
+                                "type": "string",
+                                "description": "Category filter (optional)"
+                            }
                         },
-                        "period": {
-                            "type": "string",
-                            "description": "Period (format: YYYY-MM)"
-                        },
-                        "category": {
-                            "type": "string",
-                            "description": "Category filter (optional)"
-                        }
-                    },
-                    "required": ["summary_type"]
+                        "required": ["summary_type"]
+                    }
                 }
             },
             {
-                "name": "get_reconciliation",
-                "description": "Get reconciliation data between two sources",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "source1": {
-                            "type": "string",
-                            "description": "First source (e.g., 'books', 'gstr2b')"
+                "type": "function",
+                "function": {
+                    "name": "get_reconciliation",
+                    "description": "Get reconciliation data between two sources",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source1": {
+                                "type": "string",
+                                "description": "First source (e.g., 'books', 'gstr2b')"
+                            },
+                            "source2": {
+                                "type": "string",
+                                "description": "Second source (e.g., 'gstr2b', 'bank_statements')"
+                            },
+                            "period": {
+                                "type": "string",
+                                "description": "Period (format: YYYY-MM)"
+                            }
                         },
-                        "source2": {
-                            "type": "string",
-                            "description": "Second source (e.g., 'gstr2b', 'bank_statements')"
-                        },
-                        "period": {
-                            "type": "string",
-                            "description": "Period (format: YYYY-MM)"
-                        }
-                    },
-                    "required": ["source1", "source2"]
+                        "required": ["source1", "source2"]
+                    }
                 }
             },
             {
-                "name": "search_gst_rules",
-                "description": "Search GST rules from rules database",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query"
+                "type": "function",
+                "function": {
+                    "name": "search_gst_rules",
+                    "description": "Search GST rules from rules database",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query"
+                            },
+                            "category": {
+                                "type": "string",
+                                "description": "Rule category filter (optional)"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum number of results",
+                                "default": 10
+                            }
                         },
-                        "category": {
-                            "type": "string",
-                            "description": "Rule category filter (optional)"
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of results",
-                            "default": 10
-                        }
-                    },
-                    "required": ["query"]
+                        "required": ["query"]
+                    }
                 }
             },
             {
-                "name": "explain_rule",
-                "description": "Explain a specific GST rule",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "rule_type": {
-                            "type": "string",
-                            "description": "Rule ID (e.g., 'itc_36_4', 'itc_42')"
+                "type": "function",
+                "function": {
+                    "name": "explain_rule",
+                    "description": "Explain a specific GST rule",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "rule_type": {
+                                "type": "string",
+                                "description": "Rule ID (e.g., 'itc_36_4', 'itc_42')"
+                            },
+                            "scenario": {
+                                "type": "string",
+                                "description": "Optional scenario description"
+                            }
                         },
-                        "scenario": {
-                            "type": "string",
-                            "description": "Optional scenario description"
+                        "required": ["rule_type"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_tds_certificate",
+                    "description": "Get structured TDS certificate data (Form 16, 16A, 16B, 16C)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "certificate_number": {
+                                "type": "string",
+                                "description": "TDS certificate number (optional)"
+                            },
+                            "deductor_name": {
+                                "type": "string",
+                                "description": "Deductor name (optional)"
+                            },
+                            "period": {
+                                "type": "string",
+                                "description": "Period filter (optional, format: YYYY-MM)"
+                            },
+                            "form_type": {
+                                "type": "string",
+                                "enum": ["16", "16A", "16B", "16C"],
+                                "description": "Form type (16, 16A, 16B, 16C)"
+                            }
                         }
-                    },
-                    "required": ["rule_type"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_tds_summary",
+                    "description": "Get aggregated TDS summary statistics - PRIMARY tool for TDS calculations",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "summary_type": {
+                                "type": "string",
+                                "enum": ["deducted_total", "deposited_total", "certificate_count", "return_status", "section_wise"],
+                                "description": "Type of TDS summary to retrieve"
+                            },
+                            "period": {
+                                "type": "string",
+                                "description": "Period filter (optional, format: YYYY-MM or YYYY-Q1/Q2/Q3/Q4)"
+                            },
+                            "section": {
+                                "type": "string",
+                                "description": "TDS section filter (optional, e.g., '194A', '194C')"
+                            },
+                            "deductee_pan": {
+                                "type": "string",
+                                "description": "Deductee PAN filter (optional)"
+                            }
+                        },
+                        "required": ["summary_type"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_tds_reconciliation",
+                    "description": "Reconcile TDS data between two sources (certificates vs returns, returns vs challans, books vs certificates)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source1": {
+                                "type": "string",
+                                "description": "First source (e.g., 'certificates', 'returns', 'books')"
+                            },
+                            "source2": {
+                                "type": "string",
+                                "description": "Second source (e.g., 'returns', 'challans', 'books')"
+                            },
+                            "period": {
+                                "type": "string",
+                                "description": "Period filter (optional, format: YYYY-MM)"
+                            },
+                            "form_type": {
+                                "type": "string",
+                                "description": "Form type filter (optional, e.g., '16', '16A', '24Q', '26Q')"
+                            }
+                        },
+                        "required": ["source1", "source2"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_tds_rules",
+                    "description": "Search TDS rules from rules database",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query"
+                            },
+                            "section": {
+                                "type": "string",
+                                "description": "TDS section filter (optional, e.g., '194A', '194C')"
+                            },
+                            "category": {
+                                "type": "string",
+                                "description": "Rule category filter (optional: 'deduction', 'deposit', 'return', 'compliance')"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum number of results",
+                                "default": 10
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "explain_tds_rule",
+                    "description": "Explain a specific TDS section and its applicability",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "section": {
+                                "type": "string",
+                                "description": "TDS section (e.g., '194A', '194C', '194H', '194I', '194J')"
+                            },
+                            "scenario": {
+                                "type": "string",
+                                "description": "Optional scenario description"
+                            }
+                        },
+                        "required": ["section"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_tds_return_status",
+                    "description": "Get TDS return filing status from locally uploaded documents",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "return_type": {
+                                "type": "string",
+                                "enum": ["24Q", "26Q", "27Q", "27EQ"],
+                                "description": "TDS return type (24Q: Salary, 26Q: Non-Salary, 27Q: NRI, 27EQ: TCS)"
+                            },
+                            "period": {
+                                "type": "string",
+                                "description": "Period (format: YYYY-MM)"
+                            },
+                            "quarter": {
+                                "type": "string",
+                                "enum": ["Q1", "Q2", "Q3", "Q4"],
+                                "description": "Quarter (Q1, Q2, Q3, Q4)"
+                            }
+                        },
+                        "required": ["return_type"]
+                    }
                 }
             }
         ]
@@ -310,7 +485,7 @@ Reply: "Blocked due to vendor non-filing (Rule 36(4))."
         user_id: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Process a user query with tool calling
+        Process a user query with tool calling using LiteLLM
         
         Yields:
             {
@@ -318,30 +493,6 @@ Reply: "Blocked due to vendor non-filing (Rule 36(4))."
                 "content": str | Dict
             }
         """
-        if self.provider == LLMProvider.OLLAMA:
-            async for chunk in self._process_ollama_query(query):
-                yield chunk
-            return
-        elif self.provider == LLMProvider.GEMINI:
-            async for chunk in self._process_gemini_query(query):
-                yield chunk
-            return
-        elif self.provider == LLMProvider.GROQ:
-            async for chunk in self._process_groq_query(query):
-                yield chunk
-            return
-        elif self.provider == LLMProvider.OPENROUTER:
-            async for chunk in self._process_openrouter_query(query):
-                yield chunk
-            return
-        
-        if not self.client:
-            yield {
-                "type": "error",
-                "content": "LLM service not configured. Please provide API key."
-            }
-            return
-        
         # Add user message to history
         self.conversation_history.append({
             "role": "user",
@@ -349,115 +500,161 @@ Reply: "Blocked due to vendor non-filing (Rule 36(4))."
         })
         
         try:
-            # Create message with tools
-            message = await self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=4096,
-                system=self.system_prompt,
-                tools=self._get_tool_definitions(),
-                messages=self.conversation_history[-10:],  # Last 10 messages for context
-                stream=True
-            )
+            # Build messages for LiteLLM
+            messages = self._build_messages()
+            tools = self._get_tool_definitions()
             
-            # Process stream
+            # Prepare LiteLLM call parameters
+            litellm_params = {
+                "model": self.model_name,
+                "messages": messages,
+                "tools": tools,
+                "stream": True,
+                "temperature": 0.7,
+                "max_tokens": 4096,
+            }
+            
+            # Add API key if provided
+            if self.api_key:
+                litellm_params["api_key"] = self.api_key
+            
+            # Handle Ollama special case (local URL)
+            if self.provider == LLMProvider.OLLAMA:
+                litellm_params["api_base"] = self.ollama_url
+            
+            # Call LiteLLM
+            response = await litellm.acompletion(**litellm_params)
+            
+            # Process streaming response
             current_text = ""
             tool_calls = []
+            tool_call_id_map = {}  # Map tool call index to ID
             
-            async for event in message:
-                if event.type == "message_start":
+            async for chunk in response:
+                if not hasattr(chunk, 'choices') or not chunk.choices:
                     continue
-                elif event.type == "content_block_start":
-                    if event.content_block.type == "tool_use":
-                        tool_calls.append({
-                            "id": event.content_block.id,
-                            "name": event.content_block.name,
-                            "input": event.content_block.input
-                        })
-                elif event.type == "content_block_delta":
-                    if event.delta.type == "text_delta":
-                        current_text += event.delta.text
-                        yield {
-                            "type": "text",
-                            "content": event.delta.text
-                        }
-                elif event.type == "message_delta":
-                    # Token usage info
-                    if hasattr(event, "usage"):
-                        yield {
-                            "type": "usage",
-                            "content": {
-                                "input_tokens": getattr(event.usage, "input_tokens", 0),
-                                "output_tokens": getattr(event.usage, "output_tokens", 0)
-                            }
-                        }
-            
-            # Execute tool calls
-            if tool_calls:
-                for tool_call in tool_calls:
+                
+                delta = chunk.choices[0].delta
+                
+                # Handle text content
+                if hasattr(delta, 'content') and delta.content:
+                    current_text += delta.content
                     yield {
-                        "type": "tool_call",
-                        "content": {
-                            "tool": tool_call["name"],
-                            "input": tool_call["input"]
-                        }
+                        "type": "text",
+                        "content": delta.content
                     }
-                    
-                    # Execute through firewall
-                    success, result, error = await self.firewall.process_tool_call(
-                        tool_name=tool_call["name"],
-                        params=tool_call["input"],
-                        execute_func=lambda: self._execute_tool(tool_call["name"], tool_call["input"])
-                    )
-                    
-                    if success:
+                
+                # Handle tool calls
+                if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                    for tool_call_delta in delta.tool_calls:
+                        if tool_call_delta.index is not None:
+                            idx = tool_call_delta.index
+                            
+                            # Initialize tool call if needed
+                            if idx not in tool_calls:
+                                tool_calls.append({
+                                    "id": tool_call_delta.id or f"call_{idx}",
+                                    "name": "",
+                                    "arguments": ""
+                                })
+                                if tool_call_delta.id:
+                                    tool_call_id_map[idx] = tool_call_delta.id
+                            
+                            # Update tool call
+                            if hasattr(tool_call_delta, 'function') and tool_call_delta.function:
+                                if tool_call_delta.function.name:
+                                    tool_calls[idx]["name"] = tool_call_delta.function.name
+                                if tool_call_delta.function.arguments:
+                                    tool_calls[idx]["arguments"] += tool_call_delta.function.arguments
+                
+                # Check if finished with tool calls
+                if hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason == "tool_calls":
+                    # Execute tool calls
+                    for tool_call in tool_calls:
+                        if not tool_call or not tool_call["name"]:
+                            continue
+                        
+                        try:
+                            args = json.loads(tool_call["arguments"]) if tool_call["arguments"] else {}
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse tool arguments: {tool_call['arguments']}")
+                            args = {}
+                        
                         yield {
-                            "type": "tool_result",
+                            "type": "tool_call",
                             "content": {
                                 "tool": tool_call["name"],
-                                "result": result
+                                "input": args
                             }
                         }
                         
-                        # Add tool use and result to history
-                        self.conversation_history.append({
-                            "role": "assistant",
-                            "content": [{
-                                "type": "tool_use",
-                                "id": tool_call["id"],
-                                "name": tool_call["name"],
-                                "input": tool_call["input"]
-                            }]
-                        })
-                        self.conversation_history.append({
-                            "role": "user",
-                            "content": [{
-                                "type": "tool_result",
-                                "tool_use_id": tool_call["id"],
-                                "content": str(result)
-                            }]
-                        })
-                        
-                        # Get LLM response to tool result
-                        response = await self.client.messages.create(
-                            model="claude-3-5-sonnet-20241022",
-                            max_tokens=4096,
-                            system=self.system_prompt,
-                            messages=self.conversation_history[-5:],
-                            stream=True
+                        # Execute through firewall
+                        tool_name = tool_call["name"]
+                        success, result, error = await self.firewall.process_tool_call(
+                            tool_name=tool_name,
+                            params=args,
+                            execute_func=lambda: self._execute_tool(tool_name, args)
                         )
                         
-                        async for event in response:
-                            if event.type == "content_block_delta":
-                                if event.delta.type == "text_delta":
-                                    yield {
-                                        "type": "text",
-                                        "content": event.delta.text
+                        if success:
+                            yield {
+                                "type": "tool_result",
+                                "content": {
+                                    "tool": tool_call["name"],
+                                    "result": result
+                                }
+                            }
+                            
+                            # Add tool call and result to history
+                            self.conversation_history.append({
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [{
+                                    "id": tool_call["id"],
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_call["name"],
+                                        "arguments": tool_call["arguments"]
                                     }
-                    else:
-                        yield {
-                            "type": "error",
-                            "content": f"Tool execution failed: {error}"
-                        }
+                                }]
+                            })
+                            self.conversation_history.append({
+                                "role": "tool",
+                                "content": str(result),
+                                "tool_call_id": tool_call["id"]
+                            })
+                            
+                            # Get follow-up response with tool results
+                            follow_up_messages = self._build_messages()
+                            follow_up_params = {
+                                "model": self.model_name,
+                                "messages": follow_up_messages,
+                                "tools": tools,
+                                "stream": True,
+                                "temperature": 0.7,
+                                "max_tokens": 4096,
+                            }
+                            
+                            if self.api_key:
+                                follow_up_params["api_key"] = self.api_key
+                            if self.provider == LLMProvider.OLLAMA:
+                                follow_up_params["api_base"] = self.ollama_url
+                            
+                            follow_up_response = await litellm.acompletion(**follow_up_params)
+                            
+                            async for follow_up_chunk in follow_up_response:
+                                if hasattr(follow_up_chunk, 'choices') and follow_up_chunk.choices:
+                                    delta = follow_up_chunk.choices[0].delta
+                                    if hasattr(delta, 'content') and delta.content:
+                                        yield {
+                                            "type": "text",
+                                            "content": delta.content
+                                        }
+                        else:
+                            yield {
+                                "type": "error",
+                                "content": f"Tool execution failed: {error}"
+                            }
             
             # Add final assistant response to history
             if current_text:
@@ -467,11 +664,67 @@ Reply: "Blocked due to vendor non-filing (Rule 36(4))."
                 })
         
         except Exception as e:
-            logger.error(f"Error processing query: {e}")
+            logger.error(f"Error processing query: {e}", exc_info=True)
             yield {
                 "type": "error",
                 "content": f"Error: {str(e)}"
             }
+    
+    def _build_messages(self) -> List[Dict[str, Any]]:
+        """Build messages list from conversation history for LiteLLM"""
+        messages = []
+        
+        # Add system message
+        messages.append({
+            "role": "system",
+            "content": self.system_prompt
+        })
+        
+        # Add conversation history (last 10 messages for context)
+        for msg in self.conversation_history[-10:]:
+            if msg["role"] == "user":
+                messages.append({
+                    "role": "user",
+                    "content": msg.get("content", "")
+                })
+            elif msg["role"] == "assistant":
+                # Handle assistant messages with or without tool calls
+                if msg.get("tool_calls"):
+                    # Message with tool calls
+                    messages.append({
+                        "role": "assistant",
+                        "content": msg.get("content"),
+                        "tool_calls": msg["tool_calls"]
+                    })
+                else:
+                    # Regular text message
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        # Handle Claude-style content list
+                        text_content = ""
+                        for item in content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                text_content += item.get("text", "")
+                            elif isinstance(item, str):
+                                text_content += item
+                        messages.append({
+                            "role": "assistant",
+                            "content": text_content or None
+                        })
+                    else:
+                        messages.append({
+                            "role": "assistant",
+                            "content": content
+                        })
+            elif msg["role"] == "tool":
+                # Tool result message
+                messages.append({
+                    "role": "tool",
+                    "content": str(msg.get("content", "")),
+                    "tool_call_id": msg.get("tool_call_id") or msg.get("tool_use_id", "")
+                })
+        
+        return messages
     
     async def _execute_tool(self, tool_name: str, params: Dict[str, Any]) -> Any:
         """Execute a tool (called through firewall)"""
@@ -510,6 +763,45 @@ Reply: "Blocked due to vendor non-filing (Rule 36(4))."
                 rule_type=params.get("rule_type", ""),
                 scenario=params.get("scenario")
             )
+        elif tool_name == "get_tds_certificate":
+            return await self.tool_executor.get_tds_certificate(
+                certificate_number=params.get("certificate_number"),
+                deductor_name=params.get("deductor_name"),
+                period=params.get("period"),
+                form_type=params.get("form_type")
+            )
+        elif tool_name == "get_tds_summary":
+            return await self.tool_executor.get_tds_summary(
+                summary_type=params.get("summary_type"),
+                period=params.get("period"),
+                section=params.get("section"),
+                deductee_pan=params.get("deductee_pan")
+            )
+        elif tool_name == "get_tds_reconciliation":
+            return await self.tool_executor.get_tds_reconciliation(
+                source1=params.get("source1"),
+                source2=params.get("source2"),
+                period=params.get("period"),
+                form_type=params.get("form_type")
+            )
+        elif tool_name == "search_tds_rules":
+            return await self.tool_executor.search_tds_rules(
+                query=params.get("query", ""),
+                section=params.get("section"),
+                category=params.get("category"),
+                limit=params.get("limit", 10)
+            )
+        elif tool_name == "explain_tds_rule":
+            return await self.tool_executor.explain_tds_rule(
+                section=params.get("section", ""),
+                scenario=params.get("scenario")
+            )
+        elif tool_name == "get_tds_return_status":
+            return await self.tool_executor.get_tds_return_status(
+                return_type=params.get("return_type"),
+                period=params.get("period"),
+                quarter=params.get("quarter")
+            )
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
     
@@ -520,737 +812,6 @@ Reply: "Blocked due to vendor non-filing (Rule 36(4))."
     def get_history(self) -> List[Dict[str, Any]]:
         """Get conversation history"""
         return self.conversation_history.copy()
-    
-    async def _process_ollama_query(
-        self,
-        query: str
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Process query using Ollama (local LLM)"""
-        if not HTTPX_AVAILABLE:
-            yield {
-                "type": "error",
-                "content": "httpx not available. Install with: uv pip install httpx"
-            }
-            return
-        
-        try:
-            async with httpx.AsyncClient() as client:
-                # Ollama doesn't support tool calling natively, so we'll do simple chat
-                response = await client.post(
-                    f"{self.ollama_url}/api/generate",
-                    json={
-                        "model": self.ollama_model,
-                        "prompt": f"{self.system_prompt}\n\nUser: {query}\nAssistant:",
-                        "stream": True
-                    },
-                    timeout=60.0
-                )
-                
-                async for line in response.aiter_lines():
-                    if line:
-                        try:
-                            data = json.loads(line)
-                            if "response" in data:
-                                yield {
-                                    "type": "text",
-                                    "content": data["response"]
-                                }
-                            if data.get("done"):
-                                break
-                        except Exception:
-                            continue
-        except Exception as e:
-            logger.error(f"Ollama error: {e}")
-            yield {
-                "type": "error",
-                "content": f"Ollama error: {str(e)}. Make sure Ollama is running."
-            }
-    
-    def _convert_tools_to_gemini_format(self) -> List[Dict[str, Any]]:
-        """Convert tool definitions to Gemini function calling format"""
-        function_declarations = []
-        for tool_def in self._get_tool_definitions():
-            function_declarations.append({
-                "name": tool_def["name"],
-                "description": tool_def.get("description", ""),
-                "parameters": tool_def["input_schema"]
-            })
-        return function_declarations
-    
-    def _convert_tools_to_openai_format(self) -> List[Dict[str, Any]]:
-        """Convert tool definitions to OpenAI function calling format"""
-        tools = []
-        for tool_def in self._get_tool_definitions():
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": tool_def["name"],
-                    "description": tool_def.get("description", ""),
-                    "parameters": tool_def["input_schema"]
-                }
-            })
-        return tools
-    
-    async def _process_gemini_query(
-        self,
-        query: str
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Process query using Google Gemini with function calling support"""
-        if not GEMINI_AVAILABLE:
-            yield {
-                "type": "error",
-                "content": "google-genai not available. Install with: uv pip install google-genai"
-            }
-            return
-        
-        if not self.client:
-            yield {
-                "type": "error",
-                "content": "Gemini service not configured. Please provide API key."
-            }
-            return
-        
-        # Add user message to history
-        self.conversation_history.append({
-            "role": "user",
-            "content": query
-        })
-        
-        try:
-            # Convert tools to Gemini format
-            tools = self._convert_tools_to_gemini_format()
-            
-            # Build conversation contents for Gemini
-            contents = []
-            for msg in self.conversation_history[-10:]:
-                if msg["role"] == "user":
-                    contents.append(google_genai.types.Content(
-                        role="user",
-                        parts=[google_genai.types.Part(text=str(msg.get("content", "")))]
-                    ))
-                elif msg["role"] == "assistant":
-                    # Handle both text and function call responses
-                    if isinstance(msg.get("content"), str):
-                        contents.append(google_genai.types.Content(
-                            role="model",
-                            parts=[google_genai.types.Part(text=str(msg.get("content", "")))]
-                        ))
-                    elif isinstance(msg.get("content"), list):
-                        # Handle function call format
-                        parts = []
-                        for part in msg.get("content", []):
-                            if isinstance(part, dict):
-                                if part.get("type") == "tool_use":
-                                    parts.append(google_genai.types.Part(
-                                        function_call=google_genai.types.FunctionCall(
-                                            name=part.get("name", ""),
-                                            args=part.get("input", {})
-                                        )
-                                    ))
-                                elif part.get("type") == "tool_result":
-                                    parts.append(google_genai.types.Part(
-                                        function_response=google_genai.types.FunctionResponse(
-                                            name=part.get("name", ""),
-                                            response=part.get("result", {})
-                                        )
-                                    ))
-                        if parts:
-                            contents.append(google_genai.types.Content(
-                                role="model",
-                                parts=parts
-                            ))
-            
-            # Add current user query
-            contents.append(google_genai.types.Content(
-                role="user",
-                parts=[google_genai.types.Part(text=query)]
-            ))
-            
-            # Generate content with function calling
-            def generate_sync():
-                try:
-                    config = google_genai.types.GenerateContentConfig(
-                        system_instruction=self.system_prompt,
-                        temperature=0.7,
-                        max_output_tokens=4096,
-                        tools=[google_genai.types.Tool(function_declarations=tools)] if tools else None
-                    )
-                    return self.client.models.generate_content(
-                        model=self.gemini_model,
-                        contents=contents,
-                        config=config
-                    )
-                except Exception as e:
-                    logger.error(f"Gemini generation error: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-                    return None
-            
-            # Run sync operation in thread
-            response = await asyncio.to_thread(generate_sync)
-            
-            if response is None:
-                yield {
-                    "type": "error",
-                    "content": "Failed to generate response from Gemini"
-                }
-                return
-            
-            # Check for function calls
-            function_calls = []
-            current_text = ""
-            
-            if response.candidates and len(response.candidates) > 0:
-                candidate = response.candidates[0]
-                if candidate.content and candidate.content.parts:
-                    for part in candidate.content.parts:
-                        if hasattr(part, "function_call") and part.function_call:
-                            # Function call detected
-                            try:
-                                args = {}
-                                if hasattr(part.function_call, "args"):
-                                    if isinstance(part.function_call.args, dict):
-                                        args = part.function_call.args
-                                    elif hasattr(part.function_call.args, "__dict__"):
-                                        args = part.function_call.args.__dict__
-                                
-                                function_calls.append({
-                                    "name": part.function_call.name,
-                                    "args": args
-                                })
-                            except Exception as e:
-                                logger.error(f"Error parsing function call: {e}")
-                                yield {
-                                    "type": "error",
-                                    "content": f"Error parsing function call: {str(e)}"
-                                }
-                        elif hasattr(part, "text") and part.text:
-                            current_text += part.text
-                            yield {
-                                "type": "text",
-                                "content": part.text
-                            }
-            
-            # Execute function calls if any
-            if function_calls:
-                # Store assistant response with function calls
-                assistant_content = []
-                for fc in function_calls:
-                    assistant_content.append({
-                        "type": "tool_use",
-                        "name": fc["name"],
-                        "input": fc["args"]
-                    })
-                    
-                    yield {
-                        "type": "tool_call",
-                        "content": {
-                            "tool": fc["name"],
-                            "input": fc["args"]
-                        }
-                    }
-                    
-                    # Execute through firewall
-                    success, result, error = await self.firewall.process_tool_call(
-                        tool_name=fc["name"],
-                        params=fc["args"],
-                        execute_func=lambda: self._execute_tool(fc["name"], fc["args"])
-                    )
-                    
-                    if success:
-                        yield {
-                            "type": "tool_result",
-                            "content": {
-                                "tool": fc["name"],
-                                "result": result
-                            }
-                        }
-                        
-                        # Add function response to contents for next call
-                        assistant_content.append({
-                            "type": "tool_result",
-                            "name": fc["name"],
-                            "result": result
-                        })
-                    else:
-                        yield {
-                            "type": "error",
-                            "content": f"Tool execution failed: {error}"
-                        }
-                
-                # Add assistant response with function calls to history
-                self.conversation_history.append({
-                    "role": "assistant",
-                    "content": assistant_content
-                })
-                
-                # Get final response with function results
-                # Build contents with function response
-                contents.append(google_genai.types.Content(
-                    role="model",
-                    parts=[google_genai.types.Part(
-                        function_call=google_genai.types.FunctionCall(
-                            name=function_calls[0]["name"],
-                            args=function_calls[0]["args"]
-                        )
-                    )]
-                ))
-                
-                # Add function response
-                for fc in function_calls:
-                    success, result, error = await self.firewall.process_tool_call(
-                        tool_name=fc["name"],
-                        params=fc["args"],
-                        execute_func=lambda: self._execute_tool(fc["name"], fc["args"])
-                    )
-                    if success:
-                        contents.append(google_genai.types.Content(
-                            role="user",
-                            parts=[google_genai.types.Part(
-                                function_response=google_genai.types.FunctionResponse(
-                                    name=fc["name"],
-                                    response=result
-                                )
-                            )]
-                        ))
-                
-                # Get final response
-                def get_final_response():
-                    try:
-                        config = google_genai.types.GenerateContentConfig(
-                            system_instruction=self.system_prompt,
-                            temperature=0.7,
-                            max_output_tokens=4096,
-                        )
-                        return self.client.models.generate_content(
-                            model=self.gemini_model,
-                            contents=contents,
-                            config=config
-                        )
-                    except Exception as e:
-                        logger.error(f"Gemini final response error: {e}")
-                        return None
-                
-                final_response = await asyncio.to_thread(get_final_response)
-                
-                if final_response and final_response.candidates:
-                    for candidate in final_response.candidates:
-                        if candidate.content and candidate.content.parts:
-                            for part in candidate.content.parts:
-                                if hasattr(part, "text") and part.text:
-                                    yield {
-                                        "type": "text",
-                                        "content": part.text
-                                    }
-                                    current_text += part.text
-            else:
-                # No function calls, just text response
-                if current_text:
-                    self.conversation_history.append({
-                        "role": "assistant",
-                        "content": current_text
-                    })
-        
-        except Exception as e:
-            logger.error(f"Gemini error: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            yield {
-                "type": "error",
-                "content": f"Gemini error: {str(e)}"
-            }
-    
-    async def _process_groq_query(
-        self,
-        query: str
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Process query using Groq"""
-        if not GROQ_AVAILABLE:
-            yield {
-                "type": "error",
-                "content": "groq not available. Install with: uv pip install groq"
-            }
-            return
-        
-        if not self.client:
-            yield {
-                "type": "error",
-                "content": "Groq service not configured. Please provide API key."
-            }
-            return
-        
-        # Add user message to history
-        self.conversation_history.append({
-            "role": "user",
-            "content": query
-        })
-        
-        try:
-            # Convert tools to OpenAI format
-            tools = self._convert_tools_to_openai_format()
-            
-            # Prepare messages for Groq (OpenAI-compatible)
-            messages = []
-            messages.append({
-                "role": "system",
-                "content": self.system_prompt
-            })
-            for msg in self.conversation_history[-10:]:
-                if msg["role"] in ["user", "assistant"]:
-                    messages.append({
-                        "role": msg["role"],
-                        "content": msg.get("content", "")
-                    })
-                elif msg["role"] == "tool":
-                    # Convert tool messages
-                    messages.append({
-                        "role": "tool",
-                        "content": str(msg.get("content", "")),
-                        "tool_call_id": msg.get("tool_use_id", "")
-                    })
-            
-            # Generate with streaming
-            stream = await self.client.chat.completions.create(
-                model=self.groq_model,
-                messages=messages,
-                tools=tools if tools else None,
-                stream=True,
-                temperature=0.7,
-                max_tokens=4096
-            )
-            
-            current_text = ""
-            tool_calls = []
-            current_tool_call = None
-            
-            async for chunk in stream:
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    
-                    if delta.content:
-                        current_text += delta.content
-                        yield {
-                            "type": "text",
-                            "content": delta.content
-                        }
-                    
-                    if delta.tool_calls:
-                        for tool_call_delta in delta.tool_calls:
-                            if tool_call_delta.index is not None:
-                                idx = tool_call_delta.index
-                                if idx >= len(tool_calls):
-                                    tool_calls.extend([None] * (idx + 1 - len(tool_calls)))
-                                
-                                if tool_calls[idx] is None:
-                                    tool_calls[idx] = {
-                                        "id": tool_call_delta.id or f"call_{idx}",
-                                        "name": "",
-                                        "arguments": ""
-                                    }
-                                
-                                if tool_call_delta.function:
-                                    if tool_call_delta.function.name:
-                                        tool_calls[idx]["name"] = tool_call_delta.function.name
-                                    if tool_call_delta.function.arguments:
-                                        tool_calls[idx]["arguments"] += tool_call_delta.function.arguments
-                    
-                    if chunk.choices[0].finish_reason == "tool_calls":
-                        # Execute tool calls
-                        for tool_call in tool_calls:
-                            if tool_call:
-                                try:
-                                    import json
-                                    args = json.loads(tool_call["arguments"])
-                                except:
-                                    args = {}
-                                
-                                yield {
-                                    "type": "tool_call",
-                                    "content": {
-                                        "tool": tool_call["name"],
-                                        "input": args
-                                    }
-                                }
-                                
-                                # Execute through firewall
-                                tool_name = tool_call["name"]
-                                success, result, error = await self.firewall.process_tool_call(
-                                    tool_name=tool_name,
-                                    params=args,
-                                    execute_func=lambda: self._execute_tool(tool_name, args)
-                                )
-                                
-                                if success:
-                                    yield {
-                                        "type": "tool_result",
-                                        "content": {
-                                            "tool": tool_call["name"],
-                                            "result": result
-                                        }
-                                    }
-                                    
-                                    # Add to history
-                                    self.conversation_history.append({
-                                        "role": "assistant",
-                                        "content": None,
-                                        "tool_calls": [{
-                                            "id": tool_call["id"],
-                                            "type": "function",
-                                            "function": {
-                                                "name": tool_call["name"],
-                                                "arguments": tool_call["arguments"]
-                                            }
-                                        }]
-                                    })
-                                    self.conversation_history.append({
-                                        "role": "tool",
-                                        "content": str(result),
-                                        "tool_call_id": tool_call["id"]
-                                    })
-                                    
-                                    # Get follow-up response
-                                    follow_up_messages = []
-                                    follow_up_messages.append({
-                                        "role": "system",
-                                        "content": self.system_prompt
-                                    })
-                                    for msg in self.conversation_history[-5:]:
-                                        if msg["role"] in ["user", "assistant", "tool"]:
-                                            follow_up_msg = {"role": msg["role"], "content": msg.get("content", "")}
-                                            if msg["role"] == "tool":
-                                                follow_up_msg["tool_call_id"] = msg.get("tool_call_id", "")
-                                            follow_up_messages.append(follow_up_msg)
-                                    
-                                    follow_up_stream = await self.client.chat.completions.create(
-                                        model=self.groq_model,
-                                        messages=follow_up_messages,
-                                        tools=tools if tools else None,
-                                        stream=True,
-                                        temperature=0.7,
-                                        max_tokens=4096
-                                    )
-                                    
-                                    async for follow_up_chunk in follow_up_stream:
-                                        if follow_up_chunk.choices and len(follow_up_chunk.choices) > 0:
-                                            if follow_up_chunk.choices[0].delta.content:
-                                                yield {
-                                                    "type": "text",
-                                                    "content": follow_up_chunk.choices[0].delta.content
-                                                }
-                                else:
-                                    yield {
-                                        "type": "error",
-                                        "content": f"Tool execution failed: {error}"
-                                    }
-            
-            # Add final assistant response to history
-            if current_text:
-                self.conversation_history.append({
-                    "role": "assistant",
-                    "content": current_text
-                })
-        
-        except Exception as e:
-            logger.error(f"Groq error: {e}")
-            yield {
-                "type": "error",
-                "content": f"Groq error: {str(e)}"
-            }
-    
-    async def _process_openrouter_query(
-        self,
-        query: str
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Process query using OpenRouter"""
-        if not OPENROUTER_AVAILABLE:
-            yield {
-                "type": "error",
-                "content": "openai not available. Install with: uv pip install openai"
-            }
-            return
-        
-        if not self.client:
-            yield {
-                "type": "error",
-                "content": "OpenRouter service not configured. Please provide API key."
-            }
-            return
-        
-        # Add user message to history
-        self.conversation_history.append({
-            "role": "user",
-            "content": query
-        })
-        
-        try:
-            # Convert tools to OpenAI format
-            tools = self._convert_tools_to_openai_format()
-            
-            # Prepare messages for OpenRouter (OpenAI-compatible)
-            messages = []
-            messages.append({
-                "role": "system",
-                "content": self.system_prompt
-            })
-            for msg in self.conversation_history[-10:]:
-                if msg["role"] in ["user", "assistant"]:
-                    messages.append({
-                        "role": msg["role"],
-                        "content": msg.get("content", "")
-                    })
-                elif msg["role"] == "tool":
-                    messages.append({
-                        "role": "tool",
-                        "content": str(msg.get("content", "")),
-                        "tool_call_id": msg.get("tool_use_id", "")
-                    })
-            
-            # Generate with streaming
-            stream = await self.client.chat.completions.create(
-                model=self.openrouter_model,
-                messages=messages,
-                tools=tools if tools else None,
-                stream=True,
-                temperature=0.7,
-                max_tokens=4096
-            )
-            
-            current_text = ""
-            tool_calls = []
-            
-            async for chunk in stream:
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    
-                    if delta.content:
-                        current_text += delta.content
-                        yield {
-                            "type": "text",
-                            "content": delta.content
-                        }
-                    
-                    if delta.tool_calls:
-                        for tool_call_delta in delta.tool_calls:
-                            if tool_call_delta.index is not None:
-                                idx = tool_call_delta.index
-                                if idx >= len(tool_calls):
-                                    tool_calls.extend([None] * (idx + 1 - len(tool_calls)))
-                                
-                                if tool_calls[idx] is None:
-                                    tool_calls[idx] = {
-                                        "id": tool_call_delta.id or f"call_{idx}",
-                                        "name": "",
-                                        "arguments": ""
-                                    }
-                                
-                                if tool_call_delta.function:
-                                    if tool_call_delta.function.name:
-                                        tool_calls[idx]["name"] = tool_call_delta.function.name
-                                    if tool_call_delta.function.arguments:
-                                        tool_calls[idx]["arguments"] += tool_call_delta.function.arguments
-                    
-                    if chunk.choices[0].finish_reason == "tool_calls":
-                        # Execute tool calls
-                        for tool_call in tool_calls:
-                            if tool_call:
-                                try:
-                                    import json
-                                    args = json.loads(tool_call["arguments"])
-                                except:
-                                    args = {}
-                                
-                                yield {
-                                    "type": "tool_call",
-                                    "content": {
-                                        "tool": tool_call["name"],
-                                        "input": args
-                                    }
-                                }
-                                
-                                # Execute through firewall
-                                tool_name = tool_call["name"]
-                                success, result, error = await self.firewall.process_tool_call(
-                                    tool_name=tool_name,
-                                    params=args,
-                                    execute_func=lambda: self._execute_tool(tool_name, args)
-                                )
-                                
-                                if success:
-                                    yield {
-                                        "type": "tool_result",
-                                        "content": {
-                                            "tool": tool_call["name"],
-                                            "result": result
-                                        }
-                                    }
-                                    
-                                    # Add to history
-                                    self.conversation_history.append({
-                                        "role": "assistant",
-                                        "content": None,
-                                        "tool_calls": [{
-                                            "id": tool_call["id"],
-                                            "type": "function",
-                                            "function": {
-                                                "name": tool_call["name"],
-                                                "arguments": tool_call["arguments"]
-                                            }
-                                        }]
-                                    })
-                                    self.conversation_history.append({
-                                        "role": "tool",
-                                        "content": str(result),
-                                        "tool_use_id": tool_call["id"]
-                                    })
-                                    
-                                    # Get follow-up response
-                                    follow_up_messages = []
-                                    follow_up_messages.append({
-                                        "role": "system",
-                                        "content": self.system_prompt
-                                    })
-                                    for msg in self.conversation_history[-5:]:
-                                        if msg["role"] in ["user", "assistant", "tool"]:
-                                            follow_up_msg = {"role": msg["role"], "content": msg.get("content", "")}
-                                            if msg["role"] == "tool":
-                                                follow_up_msg["tool_call_id"] = msg.get("tool_use_id", "")
-                                            follow_up_messages.append(follow_up_msg)
-                                    
-                                    follow_up_stream = await self.client.chat.completions.create(
-                                        model=self.openrouter_model,
-                                        messages=follow_up_messages,
-                                        tools=tools if tools else None,
-                                        stream=True,
-                                        temperature=0.7,
-                                        max_tokens=4096
-                                    )
-                                    
-                                    async for follow_up_chunk in follow_up_stream:
-                                        if follow_up_chunk.choices and len(follow_up_chunk.choices) > 0:
-                                            if follow_up_chunk.choices[0].delta.content:
-                                                yield {
-                                                    "type": "text",
-                                                    "content": follow_up_chunk.choices[0].delta.content
-                                                }
-                                else:
-                                    yield {
-                                        "type": "error",
-                                        "content": f"Tool execution failed: {error}"
-                                    }
-            
-            # Add final assistant response to history
-            if current_text:
-                self.conversation_history.append({
-                    "role": "assistant",
-                    "content": current_text
-                })
-        
-        except Exception as e:
-            logger.error(f"OpenRouter error: {e}")
-            yield {
-                "type": "error",
-                "content": f"OpenRouter error: {str(e)}"
-            }
     
     def estimate_tokens(self, text: str) -> int:
         """Estimate token count (rough approximation)"""

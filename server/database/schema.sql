@@ -71,3 +71,66 @@ CREATE INDEX IF NOT EXISTS idx_gst_rules_active ON gst_rules(is_active);
 CREATE INDEX IF NOT EXISTS idx_gst_rule_logic_rule_id ON gst_rule_logic(rule_id);
 CREATE INDEX IF NOT EXISTS idx_gst_rule_logic_priority ON gst_rule_logic(priority);
 
+-- TDS Rules table (for LLM reference)
+CREATE TABLE IF NOT EXISTS tds_rules (
+    id SERIAL PRIMARY KEY,
+    rule_id VARCHAR(100) UNIQUE NOT NULL,  -- e.g., "tds_194a", "tds_194c"
+    section VARCHAR(20) NOT NULL,  -- e.g., "194A", "194C"
+    name TEXT NOT NULL,
+    rule_text TEXT NOT NULL,
+    citation TEXT,
+    circular_number TEXT,
+    rate DECIMAL(5,2),  -- TDS rate percentage
+    threshold DECIMAL(15,2),  -- Threshold amount
+    exemptions TEXT,  -- JSON array of exemptions
+    effective_from DATE,
+    effective_to DATE,
+    category VARCHAR(50),  -- "deduction", "deposit", "return", "compliance"
+    version VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- TDS Rule logic (for deterministic calculations)
+CREATE TABLE IF NOT EXISTS tds_rule_logic (
+    id SERIAL PRIMARY KEY,
+    rule_id VARCHAR(100) REFERENCES tds_rules(rule_id),
+    condition_type VARCHAR(50) NOT NULL,  -- "amount_exceeds_threshold", etc.
+    condition_logic JSONB NOT NULL,
+    action_type VARCHAR(50) NOT NULL,  -- "deduct_tds", "apply_rate"
+    action_percentage DECIMAL(5,2) DEFAULT 100.0,
+    action_amount_formula TEXT,
+    priority INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Vector embeddings for TDS rules semantic search
+CREATE TABLE IF NOT EXISTS tds_rule_embeddings (
+    id SERIAL PRIMARY KEY,
+    rule_id INTEGER REFERENCES tds_rules(id),
+    embedding vector(384),
+    chunk_text TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Vector index for fast similarity search
+CREATE INDEX IF NOT EXISTS tds_rule_embeddings_embedding_idx 
+ON tds_rule_embeddings 
+USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
+
+-- Full-text search index for TDS rules
+CREATE INDEX IF NOT EXISTS tds_rules_fts_idx 
+ON tds_rules 
+USING GIN (to_tsvector('english', rule_text || ' ' || name));
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_tds_rules_section ON tds_rules(section);
+CREATE INDEX IF NOT EXISTS idx_tds_rules_category ON tds_rules(category);
+CREATE INDEX IF NOT EXISTS idx_tds_rules_version ON tds_rules(version);
+CREATE INDEX IF NOT EXISTS idx_tds_rules_active ON tds_rules(is_active);
+CREATE INDEX IF NOT EXISTS idx_tds_rule_logic_rule_id ON tds_rule_logic(rule_id);
+CREATE INDEX IF NOT EXISTS idx_tds_rule_logic_priority ON tds_rule_logic(priority);
+

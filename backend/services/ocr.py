@@ -134,7 +134,7 @@ class OCREngine:
         processed = self.preprocessor.preprocess(image)
         
         # Run OCR
-        result = self.ocr.ocr(processed, cls=True)
+        result = self.ocr.ocr(processed)
         
         if not result or not result[0]:
             return "", 0.0
@@ -187,7 +187,7 @@ class OCREngine:
                 else:
                     processed = image
                 
-                result = self.ocr.ocr(processed, cls=True)
+                result = self.ocr.ocr(processed)
                 
                 if result and result[0]:
                     page_texts = []
@@ -225,7 +225,7 @@ class OCREngine:
             else:
                 processed = image
             
-            result = self.ocr.ocr(processed, cls=True)
+            result = self.ocr.ocr(processed)
             
             if not result or not result[0]:
                 return {
