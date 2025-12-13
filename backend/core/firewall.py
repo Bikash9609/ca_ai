@@ -3,8 +3,10 @@ Context Firewall - Privacy enforcement layer
 Ensures LLM only sees summaries, never raw documents
 """
 
+import json
 from typing import Any, Dict, List, Optional
 from enum import Enum
+from .privacy import AuditLogger
 
 
 class AccessLevel(Enum):
@@ -112,12 +114,21 @@ class ResultFilter:
 class ContextFirewall:
     """Main context firewall class"""
     
-    def __init__(self):
+    def __init__(self, audit_logger: Optional[AuditLogger] = None, user_id: Optional[str] = None):
+        """
+        Initialize context firewall
+        
+        Args:
+            audit_logger: Optional audit logger instance
+            user_id: Optional user ID for logging
+        """
         self.registry = ToolRegistry()
         self.validator = ParameterValidator()
         self.filter = ResultFilter()
+        self.audit_logger = audit_logger
+        self.user_id = user_id
     
-    def process_tool_call(
+    async def process_tool_call(
         self,
         tool_name: str,
         params: Dict[str, Any],
@@ -129,25 +140,69 @@ class ContextFirewall:
         """
         # Check if tool is allowed
         if not self.registry.is_allowed(tool_name):
+            # Log violation
+            if self.audit_logger:
+                self.audit_logger.log_violation(
+                    tool_name=tool_name,
+                    params=params,
+                    reason=f"Tool '{tool_name}' is not allowed",
+                    user_id=self.user_id
+                )
             return False, None, f"Tool '{tool_name}' is not allowed"
         
         # Validate parameters
         is_valid, error = self.validator.validate(tool_name, params)
         if not is_valid:
+            # Log violation
+            if self.audit_logger:
+                self.audit_logger.log_violation(
+                    tool_name=tool_name,
+                    params=params,
+                    reason=error or "Parameter validation failed",
+                    user_id=self.user_id
+                )
             return False, None, error
         
         # Get access level
         access_level = self.registry.get_access_level(tool_name)
         if not access_level:
+            # Log violation
+            if self.audit_logger:
+                self.audit_logger.log_violation(
+                    tool_name=tool_name,
+                    params=params,
+                    reason=f"Unknown access level for tool '{tool_name}'",
+                    user_id=self.user_id
+                )
             return False, None, f"Unknown access level for tool '{tool_name}'"
         
         # Execute tool
         try:
-            result = execute_func()
+            result = await execute_func()
         except Exception as e:
+            # Log error (not a violation, but still log it)
+            if self.audit_logger:
+                self.audit_logger.log_tool_call(
+                    tool_name=tool_name,
+                    params=params,
+                    result_size=0,
+                    user_id=self.user_id
+                )
             return False, None, f"Tool execution failed: {str(e)}"
         
         # Filter result
         filtered_result = self.filter.filter_result(tool_name, result, access_level)
+        
+        # Calculate result size for logging
+        result_size = len(json.dumps(filtered_result, default=str))
+        
+        # Log successful tool call
+        if self.audit_logger:
+            self.audit_logger.log_tool_call(
+                tool_name=tool_name,
+                params=params,
+                result_size=result_size,
+                user_id=self.user_id
+            )
         
         return True, filtered_result, None

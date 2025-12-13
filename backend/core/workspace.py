@@ -3,6 +3,7 @@ Workspace management - directory structure and client management
 """
 
 import json
+import os
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -163,5 +164,11 @@ class WorkspaceManager:
 
 def get_default_workspace_path() -> Path:
     """Get default workspace path"""
+    # Check for environment variable first
+    env_path = os.getenv("CA_AI_WORKSPACE_PATH")
+    if env_path:
+        return Path(env_path)
+    
+    # Default to home directory
     home = Path.home()
     return home / "ca-ai-workspaces"

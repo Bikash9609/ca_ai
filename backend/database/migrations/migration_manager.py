@@ -39,6 +39,16 @@ class MigrationManager:
     async def apply_migration(self, conn: aiosqlite.Connection, version: str, sql: str) -> None:
         """Apply a migration"""
         try:
+            # Check if migration already applied
+            cursor = await conn.execute(
+                "SELECT version FROM migrations WHERE version = ?",
+                (version,)
+            )
+            existing = await cursor.fetchone()
+            if existing:
+                logger.info(f"Migration {version} already applied, skipping")
+                return
+            
             # Execute migration
             await conn.executescript(sql)
             # Record migration

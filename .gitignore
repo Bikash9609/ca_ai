@@ -62,6 +62,7 @@ frontend/src-tauri/Cargo.lock
 .env.local
 .env.*.local
 *.env
+!.env.example
 
 # Logs
 logs/

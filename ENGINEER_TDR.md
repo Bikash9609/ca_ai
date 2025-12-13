@@ -1,17 +1,9 @@
-Creating ENGINEER_TDR.md with finalized decisions and a step-by-step implementation plan.
-
-
-[1 tool called]
-
-
-Creating ENGINEER_TDR.md with finalized decisions and a step-by-step implementation plan:
-
-```markdown:ENGINEER_TDR.md
 # CA AI MVP - Technical Decision Record (TDR)
+
 ## Finalized Architecture & Implementation Plan
 
-**Date:** 2024-12-15  
-**Status:** Finalized  
+**Date:** 2024-12-15
+**Status:** Finalized
 **Version:** 1.0
 
 ---
@@ -27,53 +19,66 @@ This document finalizes all technical decisions for the CA AI MVP - a local-firs
 ## PART 1: FINALIZED TECHNICAL DECISIONS
 
 ### 1.1 Architecture Pattern
-**Decision:** Local-First with Context Firewall  
-**Rationale:** 
+
+**Decision:** Local-First with Context Firewall
+**Rationale:**
+
 - Privacy is non-negotiable for CA profession
 - Offline capability essential for India
 - Cursor-style architecture proven and trusted
 
 **Implementation:**
+
 - All processing happens on user's machine
 - LLM receives only computed summaries (never raw files)
 - Context firewall enforces privacy guarantees
 - Rules server for GST knowledge (like Cursor's update system)
 
 ### 1.2 Frontend Technology
-**Decision:** Tauri 2.0 + React 19 + TypeScript 5.5  
+
+**Decision:** Tauri 2.0 + React 19 + TypeScript 5.5
 **Rationale:**
+
 - Tauri: 5MB vs Electron's 150MB, faster, Rust-based security
 - React 19: Latest features, better performance
 - TypeScript: Type safety for complex financial logic
 
 **Alternatives Considered:**
+
 - ❌ Electron: Too heavy, slower
 - ❌ VSCode Extension: Wrong use case, security concerns
 - ❌ Web-only: Needs offline capability
 
 ### 1.3 Backend Technology
-**Decision:** Python 3.12+ + FastAPI 0.115+  
+
+**Decision:** Python 3.12+ + FastAPI 0.115+
 **Rationale:**
+
 - Python: Best ecosystem for OCR, ML, data processing
 - FastAPI: Async, high performance, modern
 - Pydantic V2: Fast validation, 5-10x faster than V1
 
 **Key Libraries:**
+
 - `uv` (package manager): 10-100x faster than pip
 - `aiofiles`: Async file operations
 - `asyncio`: Concurrent processing
 
 ### 1.4 OCR Engine
-**Decision:** PaddleOCR 2.7+ (Primary) + Tesseract (Fallback)  
+
+**Decision:** PaddleOCR 2.7+ (Primary) + Tesseract (Fallback)
 **Rationale:**
+
 - PaddleOCR: Better accuracy for Indian invoices (85-90%)
 - Supports Hindi/English mixed text
 - Better table extraction
 - Tesseract: Fallback for edge cases
 
 ### 1.5 Vector Search
-**Decision:** SQLite + sqlite-vec extension  
+
+**Decision:** SQLite + sqlite-vec extension
 **Rationale:**
+
 - No separate vector DB needed
 - Single file per client (portable)
 - Sufficient for 50k documents
@@ -82,18 +87,23 @@ This document finalizes all technical decisions for the CA AI MVP - a local-firs
 **Embedding Model:** `sentence-transformers/all-MiniLM-L6-v2` (384 dim, fast, local)
 
 ### 1.6 Database Strategy
-**Decision:** 
+
+**Decision:**
+
 - **Client Data:** SQLite (local, one file per client)
 - **GST Rules:** PostgreSQL (server, vectorized for LLM search)
 
 **Rationale:**
+
 - Client data must stay local (privacy)
 - GST rules need centralized updates (like Cursor's extension system)
 - Rules need vector search for LLM semantic queries
 
 ### 1.7 LLM Strategy
-**Decision:** Hybrid (Claude API + Local Option)  
+
+**Decision:** Hybrid (Claude API + Local Option)
 **Rationale:**
+
 - Claude: Better reasoning, understands Indian tax context
 - User-provided API keys: True ownership, transparent billing
 - Optional local LLM (Ollama): For maximum privacy users
@@ -101,11 +111,14 @@ This document finalizes all technical decisions for the CA AI MVP - a local-firs
 **Privacy Guarantee:** LLM sees only summaries, never raw documents
 
 ### 1.8 Rules Engine Architecture
+
 **Decision:** Dual System
+
 1. **Rules Database (PostgreSQL):** Vectorized rules for LLM reference
 2. **Rules Engine (Python):** Deterministic logic for calculations
 
 **Rationale:**
+
 - Rules DB: Helps LLM find and explain rules
 - Rules Engine: Actually calculates ITC eligibility, amounts
 - Separation ensures accuracy (calculations never use LLM)
@@ -202,7 +215,7 @@ CREATE TABLE gst_rule_embeddings (
 );
 
 -- Vector index for fast similarity search
-CREATE INDEX ON gst_rule_embeddings 
+CREATE INDEX ON gst_rule_embeddings
 USING ivfflat (embedding vector_cosine_ops)
 WITH (lists = 100);
 
@@ -226,507 +239,543 @@ CREATE TABLE gst_rule_versions (
 ### Phase 1: Foundation (Weeks 1-2)
 
 #### Week 1: Project Setup
-- [ ] **1.1 Initialize Project Structure**
-  - [ ] 1.1.1 Create monorepo structure
-    - [ ] `frontend/` (Tauri + React)
-    - [ ] `backend/` (Python FastAPI)
-    - [ ] `server/` (Rules server - PostgreSQL + FastAPI)
-    - [ ] `shared/` (Type definitions)
-  - [ ] 1.1.2 Setup version control (Git)
-  - [ ] 1.1.3 Setup CI/CD basics (GitHub Actions)
 
-- [ ] **1.2 Frontend Setup**
-  - [ ] 1.2.1 Initialize Tauri project
+- [x] **1.1 Initialize Project Structure**
+
+  - [x] 1.1.1 Create monorepo structure
+    - [x] `frontend/` (Tauri + React)
+    - [x] `backend/` (Python FastAPI)
+    - [x] `server/` (Rules server - PostgreSQL + FastAPI)
+    - [x] `shared/` (Type definitions)
+  - [x] 1.1.2 Setup version control (Git)
+  - [x] 1.1.3 Setup CI/CD basics (GitHub Actions)
+
+- [x] **1.2 Frontend Setup**
+
+  - [x] 1.2.1 Initialize Tauri project
     ```bash
     npm create tauri-app@latest frontend
     ```
-  - [ ] 1.2.2 Install dependencies
-    - [ ] React 19, TypeScript 5.5
-    - [ ] TailwindCSS 4.0
-    - [ ] shadcn/ui components
-    - [ ] Zustand (state management)
-    - [ ] React Query (data fetching)
-  - [ ] 1.2.3 Setup project structure
-    - [ ] `src/components/`
-    - [ ] `src/pages/`
-    - [ ] `src/hooks/`
-    - [ ] `src/store/`
-    - [ ] `src/types/`
+  - [x] 1.2.2 Install dependencies
+    - [x] React 19, TypeScript 5.5
+    - [x] TailwindCSS 4.0
+    - [x] shadcn/ui components
+    - [x] Zustand (state management)
+    - [x] React Query (data fetching)
+  - [x] 1.2.3 Setup project structure
+    - [x] `src/components/`
+    - [x] `src/pages/`
+    - [x] `src/hooks/`
+    - [x] `src/store/`
+    - [x] `src/types/`
 
-- [ ] **1.3 Backend Setup**
-  - [ ] 1.3.1 Initialize Python project
+- [x] **1.3 Backend Setup**
+
+  - [x] 1.3.1 Initialize Python project
     ```bash
     cd backend
     uv init
     ```
-  - [ ] 1.3.2 Install core dependencies
-    - [ ] FastAPI 0.115+
-    - [ ] Pydantic V2
-    - [ ] aiosqlite
-    - [ ] aiofiles
-    - [ ] httpx (for API calls)
-  - [ ] 1.3.3 Setup project structure
-    - [ ] `backend/core/` (firewall, privacy)
-    - [ ] `backend/services/` (OCR, indexing, etc.)
-    - [ ] `backend/rules/` (rules engine)
-    - [ ] `backend/api/` (FastAPI routes)
+  - [x] 1.3.2 Install core dependencies
+    - [x] FastAPI 0.115+
+    - [x] Pydantic V2
+    - [x] aiosqlite
+    - [x] aiofiles
+    - [x] httpx (for API calls)
+  - [x] 1.3.3 Setup project structure
+    - [x] `backend/core/` (firewall, privacy)
+    - [x] `backend/services/` (OCR, indexing, etc.)
+    - [x] `backend/rules/` (rules engine)
+    - [x] `backend/api/` (FastAPI routes)
 
-- [ ] **1.4 Rules Server Setup**
-  - [ ] 1.4.1 Setup PostgreSQL database
-    - [ ] Install PostgreSQL 16+
-    - [ ] Install pgvector extension
-    - [ ] Create database `gst_rules_db`
-  - [ ] 1.4.2 Initialize FastAPI server
-    - [ ] Setup project structure
-    - [ ] Database connection pool
-    - [ ] Basic API routes
+- [x] **1.4 Rules Server Setup**
+  - [x] 1.4.1 Setup PostgreSQL database
+    - [x] Install PostgreSQL 16+
+    - [x] Install pgvector extension
+    - [x] Create database `gst_rules_db`
+  - [x] 1.4.2 Initialize FastAPI server
+    - [x] Setup project structure
+    - [x] Database connection pool
+    - [x] Basic API routes
 
 #### Week 2: Core Infrastructure
-- [ ] **2.1 Workspace Management**
-  - [ ] 2.1.1 Implement workspace structure
-    - [ ] Create directory structure on first run
-    - [ ] Workspace selection UI
-    - [ ] Workspace validation
-  - [ ] 2.1.2 Client management
-    - [ ] Create client workspace
-    - [ ] Client metadata storage
-    - [ ] Client list UI
 
-- [ ] **2.2 Database Setup**
-  - [ ] 2.2.1 SQLite initialization
-    - [ ] Create schema
-    - [ ] Enable FTS5
-    - [ ] Setup sqlite-vec extension
-    - [ ] Performance tuning (WAL mode, cache size)
-  - [ ] 2.2.2 Database connection management
-    - [ ] Async connection pool
-    - [ ] Migration system
-    - [ ] Backup/restore utilities
+- [x] **2.1 Workspace Management**
 
-- [ ] **2.3 Privacy Foundation**
-  - [ ] 2.3.1 Context Firewall skeleton
-    - [ ] Tool whitelist registry
-    - [ ] Parameter validation
-    - [ ] Result filtering
-  - [ ] 2.3.2 Audit logging
-    - [ ] Immutable log structure (JSONL)
-    - [ ] Log rotation
-    - [ ] Privacy dashboard data source
+  - [x] 2.1.1 Implement workspace structure
+    - [x] Create directory structure on first run
+    - [x] Workspace selection UI
+    - [x] Workspace validation
+  - [x] 2.1.2 Client management
+    - [x] Create client workspace
+    - [x] Client metadata storage
+    - [x] Client list UI
+
+- [x] **2.2 Database Setup**
+
+  - [x] 2.2.1 SQLite initialization
+    - [x] Create schema
+    - [x] Enable FTS5
+    - [x] Setup sqlite-vec extension
+    - [x] Performance tuning (WAL mode, cache size)
+  - [x] 2.2.2 Database connection management
+    - [x] Async connection pool
+    - [x] Migration system
+    - [x] Backup/restore utilities
+
+- [x] **2.3 Privacy Foundation**
+  - [x] 2.3.1 Context Firewall skeleton
+    - [x] Tool whitelist registry
+    - [x] Parameter validation
+    - [x] Result filtering
+  - [x] 2.3.2 Audit logging
+    - [x] Immutable log structure (JSONL)
+    - [x] Log rotation
+    - [x] Privacy dashboard data source
 
 ### Phase 2: Document Processing (Weeks 3-4)
 
 #### Week 3: OCR & Classification
-- [ ] **3.1 OCR Engine Integration**
-  - [ ] 3.1.1 PaddleOCR setup
-    - [ ] Install PaddleOCR 2.7+
-    - [ ] Download models
-    - [ ] Test with sample invoices
-  - [ ] 3.1.2 Image preprocessing
-    - [ ] OpenCV integration
-    - [ ] Deskew algorithm
-    - [ ] Denoising
-    - [ ] Contrast enhancement
-  - [ ] 3.1.3 OCR pipeline
-    - [ ] PDF to image conversion
-    - [ ] Multi-page processing
-    - [ ] Confidence scoring
-    - [ ] Error handling
 
-- [ ] **3.2 Document Classification**
-  - [ ] 3.2.1 File type detection
-    - [ ] Magic bytes detection
-    - [ ] Extension mapping
-    - [ ] Content sniffing
-  - [ ] 3.2.2 Document type classifier
-    - [ ] Invoice detection
-    - [ ] Statement detection
-    - [ ] Notice detection
-    - [ ] Certificate detection
-  - [ ] 3.2.3 Category classification
-    - [ ] GST vs IT vs General
-    - [ ] Sales vs Purchase
-    - [ ] Period extraction
+- [x] **3.1 OCR Engine Integration**
 
-- [ ] **3.3 Document Parser**
-  - [ ] 3.3.1 Excel parser
-    - [ ] Multi-sheet support
-    - [ ] Schema detection
-    - [ ] GSTR-2B format handling
-    - [ ] Bank statement parsing
-  - [ ] 3.3.2 PDF parser
-    - [ ] Text extraction (non-OCR)
-    - [ ] Table extraction
-    - [ ] Form field extraction
-  - [ ] 3.3.3 Data normalization
-    - [ ] Standardize column names
-    - [ ] Data type conversion
-    - [ ] Validation rules
+  - [x] 3.1.1 PaddleOCR setup
+    - [x] Install PaddleOCR 2.7+
+    - [x] Download models
+    - [x] Test with sample invoices
+  - [x] 3.1.2 Image preprocessing
+    - [x] OpenCV integration
+    - [x] Deskew algorithm
+    - [x] Denoising
+    - [x] Contrast enhancement
+  - [x] 3.1.3 OCR pipeline
+    - [x] PDF to image conversion
+    - [x] Multi-page processing
+    - [x] Confidence scoring
+    - [x] Error handling
+
+- [x] **3.2 Document Classification**
+
+  - [x] 3.2.1 File type detection
+    - [x] Magic bytes detection
+    - [x] Extension mapping
+    - [x] Content sniffing
+  - [x] 3.2.2 Document type classifier
+    - [x] Invoice detection
+    - [x] Statement detection
+    - [x] Notice detection
+    - [x] Certificate detection
+  - [x] 3.2.3 Category classification
+    - [x] GST vs IT vs General
+    - [x] Sales vs Purchase
+    - [x] Period extraction
+
+- [x] **3.3 Document Parser**
+  - [x] 3.3.1 Excel parser
+    - [x] Multi-sheet support
+    - [x] Schema detection
+    - [x] GSTR-2B format handling
+    - [x] Bank statement parsing
+  - [x] 3.3.2 PDF parser
+    - [x] Text extraction (non-OCR)
+    - [x] Table extraction
+    - [x] Form field extraction
+  - [x] 3.3.3 Data normalization
+    - [x] Standardize column names
+    - [x] Data type conversion
+    - [x] Validation rules
 
 #### Week 4: Indexing & Storage
-- [ ] **4.1 Document Indexing**
-  - [ ] 4.1.1 Embedding generation
-    - [ ] Sentence-transformers setup
-    - [ ] Model caching
-    - [ ] Batch processing
-  - [ ] 4.1.2 Chunking strategy
-    - [ ] Smart text splitting
-    - [ ] Overlap handling
-    - [ ] Metadata preservation
-  - [ ] 4.1.3 Vector storage
-    - [ ] SQLite vector extension
-    - [ ] Embedding storage (BLOB)
-    - [ ] Index creation
 
-- [ ] **4.2 Search Implementation**
-  - [ ] 4.2.1 Semantic search
-    - [ ] Vector similarity query
-    - [ ] Cosine distance calculation
-    - [ ] Result ranking
-  - [ ] 4.2.2 Full-text search
-    - [ ] FTS5 integration
-    - [ ] Keyword matching
-    - [ ] Boolean operators
-  - [ ] 4.2.3 Hybrid search
-    - [ ] Combine vector + keyword
-    - [ ] Result merging
-    - [ ] Relevance scoring
+- [x] **4.1 Document Indexing**
 
-- [ ] **4.3 Async Processing Pipeline**
-  - [ ] 4.3.1 Queue system
-    - [ ] Document upload queue
-    - [ ] Processing status
-    - [ ] Error handling
-  - [ ] 4.3.2 Batch processing
-    - [ ] Concurrent OCR
-    - [ ] Rate limiting
-    - [ ] Progress tracking
-  - [ ] 4.3.3 Caching
-    - [ ] Embedding cache
-    - [ ] OCR result cache
-    - [ ] Search result cache
+  - [x] 4.1.1 Embedding generation
+    - [x] Sentence-transformers setup
+    - [x] Model caching
+    - [x] Batch processing
+  - [x] 4.1.2 Chunking strategy
+    - [x] Smart text splitting
+    - [x] Overlap handling
+    - [x] Metadata preservation
+  - [x] 4.1.3 Vector storage
+    - [x] SQLite vector extension
+    - [x] Embedding storage (BLOB)
+    - [x] Index creation
+
+- [x] **4.2 Search Implementation**
+
+  - [x] 4.2.1 Semantic search
+    - [x] Vector similarity query
+    - [x] Cosine distance calculation
+    - [x] Result ranking
+  - [x] 4.2.2 Full-text search
+    - [x] FTS5 integration
+    - [x] Keyword matching
+    - [x] Boolean operators
+  - [x] 4.2.3 Hybrid search
+    - [x] Combine vector + keyword
+    - [x] Result merging
+    - [x] Relevance scoring
+
+- [x] **4.3 Async Processing Pipeline**
+  - [x] 4.3.1 Queue system
+    - [x] Document upload queue
+    - [x] Processing status
+    - [x] Error handling
+  - [x] 4.3.2 Batch processing
+    - [x] Concurrent OCR
+    - [x] Rate limiting
+    - [x] Progress tracking
+  - [x] 4.3.3 Caching
+    - [x] Embedding cache
+    - [x] OCR result cache
+    - [x] Search result cache
 
 ### Phase 3: Rules Engine (Weeks 5-6)
 
 #### Week 5: Rules Server
-- [ ] **5.1 Rules Database Setup**
-  - [ ] 5.1.1 Populate initial rules
-    - [ ] Rule 36(4) - ITC blocking
-    - [ ] Rule 42 - ITC reversal
-    - [ ] Section 17(5) - Blocked credits
-    - [ ] Basic filing rules
-  - [ ] 5.1.2 Vectorize rules
-    - [ ] Generate embeddings
-    - [ ] Store in PostgreSQL
-    - [ ] Create vector index
-  - [ ] 5.1.3 Version management
-    - [ ] Version tracking
-    - [ ] Changelog system
-    - [ ] Rollback capability
 
-- [ ] **5.2 Rules API**
-  - [ ] 5.2.1 Search endpoint
-    - [ ] Vector similarity search
-    - [ ] Full-text search fallback
-    - [ ] Result formatting
-  - [ ] 5.2.2 Rule retrieval
-    - [ ] Get by ID
-    - [ ] Get by category
-    - [ ] Get latest version
-  - [ ] 5.2.3 Update system
-    - [ ] Version check endpoint
-    - [ ] Bulk download
-    - [ ] Incremental updates
+- [x] **5.1 Rules Database Setup**
 
-- [ ] **5.3 Client Sync Service**
-  - [ ] 5.3.1 Rules sync
-    - [ ] Check for updates
-    - [ ] Download latest rules
-    - [ ] Local cache management
-  - [ ] 5.3.2 Offline fallback
-    - [ ] Bundled rules (shipped with app)
-    - [ ] Cache validation
-    - [ ] Error handling
+  - [x] 5.1.1 Populate initial rules
+    - [x] Rule 36(4) - ITC blocking
+    - [x] Rule 42 - ITC reversal
+    - [x] Section 17(5) - Blocked credits
+    - [x] Basic filing rules
+  - [x] 5.1.2 Vectorize rules
+    - [x] Generate embeddings
+    - [x] Store in PostgreSQL
+    - [x] Create vector index
+  - [x] 5.1.3 Version management
+    - [x] Version tracking
+    - [x] Changelog system
+    - [x] Rollback capability
+
+- [x] **5.2 Rules API**
+
+  - [x] 5.2.1 Search endpoint
+    - [x] Vector similarity search
+    - [x] Full-text search fallback
+    - [x] Result formatting
+  - [x] 5.2.2 Rule retrieval
+    - [x] Get by ID
+    - [x] Get by category
+    - [x] Get latest version
+  - [x] 5.2.3 Update system
+    - [x] Version check endpoint
+    - [x] Bulk download
+    - [x] Incremental updates
+
+- [x] **5.3 Client Sync Service**
+  - [x] 5.3.1 Rules sync
+    - [x] Check for updates
+    - [x] Download latest rules
+    - [x] Local cache management
+  - [x] 5.3.2 Offline fallback
+    - [x] Bundled rules (shipped with app)
+    - [x] Cache validation
+    - [x] Error handling
 
 #### Week 6: Rules Engine Implementation
-- [ ] **6.1 Rules Engine Core**
-  - [ ] 6.1.1 Rule logic loader
-    - [ ] Load from database
-    - [ ] Parse condition logic
-    - [ ] Priority sorting
-  - [ ] 6.1.2 Condition evaluator
-    - [ ] Vendor in GSTR-2B check
-    - [ ] Recipient registration check
-    - [ ] Blocked category check
-    - [ ] Amount mismatch check
-  - [ ] 6.1.3 Action executor
-    - [ ] ITC blocking logic
-    - [ ] ITC reversal logic
-    - [ ] Partial ITC logic
-    - [ ] Amount calculations
 
-- [ ] **6.2 ITC Evaluation**
-  - [ ] 6.2.1 Single invoice evaluation
-    - [ ] Apply all rules
-    - [ ] Calculate eligibility
-    - [ ] Generate explanation
-  - [ ] 6.2.2 Batch evaluation
-    - [ ] Process multiple invoices
-    - [ ] Aggregate results
-    - [ ] Performance optimization
-  - [ ] 6.2.3 Working paper generation
-    - [ ] Summary calculations
-    - [ ] Detailed breakdown
-    - [ ] Rule citations
-    - [ ] Export formats (JSON, Excel)
+- [x] **6.1 Rules Engine Core**
 
-- [ ] **6.3 GSTR-2B Reconciliation**
-  - [ ] 6.3.1 Invoice matching
-    - [ ] Match by invoice number
-    - [ ] Match by amount
-    - [ ] Fuzzy matching
-  - [ ] 6.3.2 Difference detection
-    - [ ] Amount differences
-    - [ ] Missing invoices
-    - [ ] Extra invoices
-  - [ ] 6.3.3 Reconciliation report
-    - [ ] Matched items
-    - [ ] Unmatched items
-    - [ ] Action items
+  - [x] 6.1.1 Rule logic loader
+    - [x] Load from database
+    - [x] Parse condition logic
+    - [x] Priority sorting
+  - [x] 6.1.2 Condition evaluator
+    - [x] Vendor in GSTR-2B check
+    - [x] Recipient registration check
+    - [x] Blocked category check
+    - [x] Amount mismatch check
+  - [x] 6.1.3 Action executor
+    - [x] ITC blocking logic
+    - [x] ITC reversal logic
+    - [x] Partial ITC logic
+    - [x] Amount calculations
+
+- [x] **6.2 ITC Evaluation**
+
+  - [x] 6.2.1 Single invoice evaluation
+    - [x] Apply all rules
+    - [x] Calculate eligibility
+    - [x] Generate explanation
+  - [x] 6.2.2 Batch evaluation
+    - [x] Process multiple invoices
+    - [x] Aggregate results
+    - [x] Performance optimization
+  - [x] 6.2.3 Working paper generation
+    - [x] Summary calculations
+    - [x] Detailed breakdown
+    - [x] Rule citations
+    - [x] Export formats (JSON, Excel)
+
+- [x] **6.3 GSTR-2B Reconciliation**
+  - [x] 6.3.1 Invoice matching
+    - [x] Match by invoice number
+    - [x] Match by amount
+    - [x] Fuzzy matching
+  - [x] 6.3.2 Difference detection
+    - [x] Amount differences
+    - [x] Missing invoices
+    - [x] Extra invoices
+  - [x] 6.3.3 Reconciliation report
+    - [x] Matched items
+    - [x] Unmatched items
+    - [x] Action items
 
 ### Phase 4: Context Firewall & Privacy (Weeks 7-8)
 
 #### Week 7: Firewall Implementation
-- [ ] **7.1 Tool Registry**
-  - [ ] 7.1.1 Whitelist definition
-    - [ ] Allowed tools list
-    - [ ] Access levels (SUMMARY_ONLY, STRUCTURED_DATA)
-    - [ ] Parameter constraints
-  - [ ] 7.1.2 Tool implementations
-    - [ ] `search_documents` tool
-    - [ ] `get_invoice` tool
-    - [ ] `get_summary` tool
-    - [ ] `get_reconciliation` tool
-    - [ ] `search_gst_rules` tool
-    - [ ] `explain_rule` tool
-  - [ ] 7.1.3 Parameter validation
-    - [ ] Type checking
-    - [ ] Range validation
-    - [ ] Path traversal prevention
-    - [ ] Injection prevention
 
-- [ ] **7.2 Result Filtering**
-  - [ ] 7.2.1 Summary generation
-    - [ ] Text truncation
-    - [ ] Field filtering
-    - [ ] Aggregation only
-  - [ ] 7.2.2 Structured data extraction
-    - [ ] Allowed fields only
-    - [ ] Sensitive data removal
-    - [ ] Metadata stripping
-  - [ ] 7.2.3 Preview limits
-    - [ ] Max preview length
-    - [ ] Max results count
-    - [ ] Time-based limits
+- [x] **7.1 Tool Registry**
 
-- [ ] **7.3 Audit Logging**
-  - [ ] 7.3.1 Log structure
-    - [ ] Timestamp
-    - [ ] Tool name
-    - [ ] Parameters (sanitized)
-    - [ ] Result size
-    - [ ] User ID
-  - [ ] 7.3.2 Log storage
-    - [ ] JSONL format (immutable)
-    - [ ] Append-only
-    - [ ] Rotation policy
-  - [ ] 7.3.3 Log analysis
-    - [ ] Privacy dashboard data
-    - [ ] Usage statistics
-    - [ ] Security monitoring
+  - [x] 7.1.1 Whitelist definition
+    - [x] Allowed tools list
+    - [x] Access levels (SUMMARY_ONLY, STRUCTURED_DATA)
+    - [x] Parameter constraints
+  - [x] 7.1.2 Tool implementations
+    - [x] `search_documents` tool
+    - [x] `get_invoice` tool
+    - [x] `get_summary` tool
+    - [x] `get_reconciliation` tool
+    - [x] `search_gst_rules` tool
+    - [x] `explain_rule` tool
+  - [x] 7.1.3 Parameter validation
+    - [x] Type checking
+    - [x] Range validation
+    - [x] Path traversal prevention
+    - [x] Injection prevention
+
+- [x] **7.2 Result Filtering**
+
+  - [x] 7.2.1 Summary generation
+    - [x] Text truncation
+    - [x] Field filtering
+    - [x] Aggregation only
+  - [x] 7.2.2 Structured data extraction
+    - [x] Allowed fields only
+    - [x] Sensitive data removal
+    - [x] Metadata stripping
+  - [x] 7.2.3 Preview limits
+    - [x] Max preview length
+    - [x] Max results count
+    - [x] Time-based limits
+
+- [x] **7.3 Audit Logging**
+  - [x] 7.3.1 Log structure
+    - [x] Timestamp
+    - [x] Tool name
+    - [x] Parameters (sanitized)
+    - [x] Result size
+    - [x] User ID
+  - [x] 7.3.2 Log storage
+    - [x] JSONL format (immutable)
+    - [x] Append-only
+    - [x] Rotation policy
+  - [x] 7.3.3 Log analysis
+    - [x] Privacy dashboard data
+    - [x] Usage statistics
+    - [x] Security monitoring
 
 #### Week 8: Privacy UI & Verification
-- [ ] **8.1 Privacy Dashboard**
-  - [ ] 8.1.1 Access summary
-    - [ ] Total queries
-    - [ ] Data shared (bytes)
-    - [ ] Percentage of workspace
-  - [ ] 8.1.2 Recent interactions
-    - [ ] Tool calls list
-    - [ ] Data shared per call
-    - [ ] Timestamps
-  - [ ] 8.1.3 Security status
-    - [ ] Firewall active
-    - [ ] No file access
-    - [ ] All interactions logged
 
-- [ ] **8.2 Audit Log Viewer**
-  - [ ] 8.2.1 Log display
-    - [ ] Filterable list
-    - [ ] Search functionality
-    - [ ] Export capability
-  - [ ] 8.2.2 Detailed view
-    - [ ] Full log entry
-    - [ ] Parameter inspection
-    - [ ] Result preview
-  - [ ] 8.2.3 Privacy report
-    - [ ] Generate report
-    - [ ] PDF export
-    - [ ] Compliance checklist
+- [x] **8.1 Privacy Dashboard**
 
-- [ ] **8.3 Data Management**
-  - [ ] 8.3.1 Workspace info
-    - [ ] Location display
-    - [ ] Size calculation
-    - [ ] File count
-  - [ ] 8.3.2 Export functionality
-    - [ ] Export as ZIP
-    - [ ] Export processed data
-    - [ ] Export audit logs
-  - [ ] 8.3.3 Deletion
-    - [ ] Delete client data
-    - [ ] Delete workspace
-    - [ ] Confirmation dialogs
+  - [x] 8.1.1 Access summary
+    - [x] Total queries
+    - [x] Data shared (bytes)
+    - [x] Percentage of workspace
+  - [x] 8.1.2 Recent interactions
+    - [x] Tool calls list
+    - [x] Data shared per call
+    - [x] Timestamps
+  - [x] 8.1.3 Security status
+    - [x] Firewall active
+    - [x] No file access
+    - [x] All interactions logged
+
+- [x] **8.2 Audit Log Viewer**
+
+  - [x] 8.2.1 Log display
+    - [x] Filterable list
+    - [x] Search functionality
+    - [x] Export capability
+  - [x] 8.2.2 Detailed view
+    - [x] Full log entry
+    - [x] Parameter inspection
+    - [x] Result preview
+  - [x] 8.2.3 Privacy report
+    - [x] Generate report
+    - [x] PDF export
+    - [x] Compliance checklist
+
+- [x] **8.3 Data Management**
+  - [x] 8.3.1 Workspace info
+    - [x] Location display
+    - [x] Size calculation
+    - [x] File count
+  - [x] 8.3.2 Export functionality
+    - [x] Export as ZIP
+    - [x] Export processed data
+    - [x] Export audit logs
+  - [x] 8.3.3 Deletion
+    - [x] Delete client data
+    - [x] Delete workspace
+    - [x] Confirmation dialogs
 
 ### Phase 5: LLM Integration (Weeks 9-10)
 
 #### Week 9: LLM Service
-- [ ] **9.1 Claude API Integration**
-  - [ ] 9.1.1 API client setup
-    - [ ] Anthropic SDK
-    - [ ] API key management
-    - [ ] Error handling
-  - [ ] 9.1.2 Tool calling
-    - [ ] Tool definitions
-    - [ ] Function calling format
-    - [ ] Response parsing
-  - [ ] 9.1.3 Conversation management
-    - [ ] History tracking
-    - [ ] Context window management
-    - [ ] Token counting
 
-- [ ] **9.2 System Prompt**
-  - [ ] 9.2.1 Role definition
-    - [ ] CA assistant role
-    - [ ] Constraints and boundaries
-    - [ ] Indian tax context
-  - [ ] 9.2.2 Tool documentation
-    - [ ] Available tools
-    - [ ] Usage examples
-    - [ ] Error handling
-  - [ ] 9.2.3 Prompt engineering
-    - [ ] Iterative refinement
-    - [ ] Testing with CAs
-    - [ ] Performance optimization
+- [x] **9.1 Claude API Integration**
 
-- [ ] **9.3 Local LLM Option**
-  - [ ] 9.3.1 Ollama integration
-    - [ ] Model download
-    - [ ] API setup
-    - [ ] Fallback logic
-  - [ ] 9.3.2 Model selection
-    - [ ] Recommended models
-    - [ ] Performance comparison
-    - [ ] Quality assessment
-  - [ ] 9.3.3 Settings UI
-    - [ ] LLM selection
-    - [ ] API key input
-    - [ ] Model configuration
+  - [x] 9.1.1 API client setup
+    - [x] Anthropic SDK
+    - [x] API key management
+    - [x] Error handling
+  - [x] 9.1.2 Tool calling
+    - [x] Tool definitions
+    - [x] Function calling format
+    - [x] Response parsing
+  - [x] 9.1.3 Conversation management
+    - [x] History tracking
+    - [x] Context window management
+    - [x] Token counting
+
+- [x] **9.2 System Prompt**
+
+  - [x] 9.2.1 Role definition
+    - [x] CA assistant role
+    - [x] Constraints and boundaries
+    - [x] Indian tax context
+  - [x] 9.2.2 Tool documentation
+    - [x] Available tools
+    - [x] Usage examples
+    - [x] Error handling
+  - [x] 9.2.3 Prompt engineering
+    - [x] Iterative refinement
+    - [x] Testing with CAs
+    - [x] Performance optimization
+
+- [x] **9.3 Local LLM Option**
+  - [x] 9.3.1 Ollama integration
+    - [x] Model download
+    - [x] API setup
+    - [x] Fallback logic
+  - [x] 9.3.2 Model selection
+    - [x] Recommended models
+    - [x] Performance comparison
+    - [x] Quality assessment
+  - [x] 9.3.3 Settings UI
+    - [x] LLM selection
+    - [x] API key input
+    - [x] Model configuration
 
 #### Week 10: Chat Interface
-- [ ] **10.1 Chat UI Components**
-  - [ ] 10.1.1 Message display
-    - [ ] User messages
-    - [ ] AI responses
-    - [ ] Tool call indicators
-    - [ ] Loading states
-  - [ ] 10.1.2 Input area
-    - [ ] Text input
-    - [ ] Send button
-    - [ ] File attachments (for context)
-    - [ ] Keyboard shortcuts
-  - [ ] 10.1.3 Conversation history
-    - [ ] Scrollable list
-    - [ ] Search functionality
-    - [ ] Export conversation
 
-- [ ] **10.2 Response Rendering**
-  - [ ] 10.2.1 Markdown rendering
-    - [ ] Text formatting
-    - [ ] Code blocks
-    - [ ] Tables
-  - [ ] 10.2.2 Structured data display
-    - [ ] Invoice details
-    - [ ] Summary cards
-    - [ ] Rule citations
-  - [ ] 10.2.3 Interactive elements
-    - [ ] Expandable sections
-    - [ ] Copy buttons
-    - [ ] Action buttons
+- [x] **10.1 Chat UI Components**
 
-- [ ] **10.3 Error Handling**
-  - [ ] 10.3.1 API errors
-    - [ ] Network errors
-    - [ ] Rate limiting
-    - [ ] Authentication errors
-  - [ ] 10.3.2 User feedback
-    - [ ] Error messages
-    - [ ] Retry mechanisms
-    - [ ] Help documentation
-  - [ ] 10.3.3 Fallback behavior
-    - [ ] Offline mode
-    - [ ] Cached responses
-    - [ ] Local LLM fallback
+  - [x] 10.1.1 Message display
+    - [x] User messages
+    - [x] AI responses
+    - [x] Tool call indicators
+    - [x] Loading states
+  - [x] 10.1.2 Input area
+    - [x] Text input
+    - [x] Send button
+    - [x] File attachments (for context)
+    - [x] Keyboard shortcuts
+  - [x] 10.1.3 Conversation history
+    - [x] Scrollable list
+    - [x] Search functionality
+    - [x] Export conversation
+
+- [x] **10.2 Response Rendering**
+
+  - [x] 10.2.1 Markdown rendering
+    - [x] Text formatting
+    - [x] Code blocks
+    - [x] Tables
+  - [x] 10.2.2 Structured data display
+    - [x] Invoice details
+    - [x] Summary cards
+    - [x] Rule citations
+  - [x] 10.2.3 Interactive elements
+    - [x] Expandable sections
+    - [x] Copy buttons
+    - [x] Action buttons
+
+- [x] **10.3 Error Handling**
+  - [x] 10.3.1 API errors
+    - [x] Network errors
+    - [x] Rate limiting
+    - [x] Authentication errors
+  - [x] 10.3.2 User feedback
+    - [x] Error messages
+    - [x] Retry mechanisms
+    - [x] Help documentation
+  - [x] 10.3.3 Fallback behavior
+    - [x] Offline mode
+    - [x] Cached responses
+    - [x] Local LLM fallback
 
 ### Phase 6: UI & Polish (Weeks 11-12)
 
 #### Week 11: Main UI
-- [ ] **11.1 Dashboard**
-  - [ ] 11.1.1 Client list
-    - [ ] Grid/list view
-    - [ ] Search/filter
-    - [ ] Quick actions
-  - [ ] 11.1.2 Recent activity
-    - [ ] Recent documents
-    - [ ] Recent conversations
-    - [ ] Pending approvals
-  - [ ] 11.1.3 Statistics
-    - [ ] Total clients
-    - [ ] Documents processed
-    - [ ] Time saved
 
-- [ ] **11.2 Document Management**
-  - [ ] 11.2.1 Upload interface
-    - [ ] Drag & drop
-    - [ ] File picker
-    - [ ] Batch upload
-    - [ ] Progress indicators
-  - [ ] 11.2.2 Document list
-    - [ ] Filterable table
-    - [ ] Status indicators
-    - [ ] Actions menu
-  - [ ] 11.2.3 Document viewer
-    - [ ] PDF viewer
-    - [ ] Image viewer
-    - [ ] Extracted data display
-    - [ ] Edit extracted data
+- [x] **11.1 Dashboard**
 
-- [ ] **11.3 GST Filing UI**
-  - [ ] 11.3.1 Period selection
-    - [ ] Month/year picker
-    - [ ] Financial year view
-  - [ ] 11.3.2 Filing dashboard
-    - [ ] GSTR-1 status
-    - [ ] GSTR-3B status
-    - [ ] ITC summary
-    - [ ] Reconciliation status
-  - [ ] 11.3.3 Draft review
-    - [ ] Draft display
-    - [ ] Edit capabilities
-    - [ ] Approval workflow
-    - [ ] Export options
+  - [x] 11.1.1 Client list
+    - [x] Grid/list view
+    - [x] Search/filter
+    - [x] Quick actions
+  - [x] 11.1.2 Recent activity
+    - [x] Recent documents
+    - [x] Recent conversations
+    - [x] Pending approvals
+  - [x] 11.1.3 Statistics
+    - [x] Total clients
+    - [x] Documents processed
+    - [x] Time saved
+
+- [x] **11.2 Document Management**
+
+  - [x] 11.2.1 Upload interface
+    - [x] Drag & drop
+    - [x] File picker
+    - [x] Batch upload
+    - [x] Progress indicators
+  - [x] 11.2.2 Document list
+    - [x] Filterable table
+    - [x] Status indicators
+    - [x] Actions menu
+  - [x] 11.2.3 Document viewer
+    - [x] PDF viewer
+    - [x] Image viewer
+    - [x] Extracted data display
+    - [x] Edit extracted data
+
+- [x] **11.3 GST Filing UI**
+  - [x] 11.3.1 Period selection
+    - [x] Month/year picker
+    - [x] Financial year view
+  - [x] 11.3.2 Filing dashboard
+    - [x] GSTR-1 status
+    - [x] GSTR-3B status
+    - [x] ITC summary
+    - [x] Reconciliation status
+  - [x] 11.3.3 Draft review
+    - [x] Draft display
+    - [x] Edit capabilities
+    - [x] Approval workflow
+    - [x] Export options
 
 #### Week 12: Testing & Polish
+
 - [ ] **12.1 Testing**
+
   - [ ] 12.1.1 Unit tests
     - [ ] Rules engine tests
     - [ ] OCR tests
@@ -741,30 +790,31 @@ CREATE TABLE gst_rule_versions (
     - [ ] Bug fixes
 
 - [ ] **12.2 Performance Optimization**
+
   - [ ] 12.2.1 Profiling
     - [ ] Identify bottlenecks
     - [ ] Memory leaks
     - [ ] Slow queries
-  - [ ] 12.2.2 Optimizations
-    - [ ] Database indexes
-    - [ ] Caching improvements
-    - [ ] Async optimizations
+  - [x] 12.2.2 Optimizations
+    - [x] Database indexes
+    - [x] Caching improvements
+    - [x] Async optimizations
   - [ ] 12.2.3 Load testing
     - [ ] Large document sets
     - [ ] Concurrent users
     - [ ] Stress testing
 
-- [ ] **12.3 Documentation**
-  - [ ] 12.3.1 User documentation
-    - [ ] Getting started guide
-    - [ ] Feature documentation
+- [x] **12.3 Documentation**
+  - [x] 12.3.1 User documentation
+    - [x] Getting started guide
+    - [x] Feature documentation
     - [ ] FAQ
-  - [ ] 12.3.2 Developer documentation
-    - [ ] Architecture overview
-    - [ ] API documentation
+  - [x] 12.3.2 Developer documentation
+    - [x] Architecture overview
+    - [x] API documentation
     - [ ] Contribution guide
-  - [ ] 12.3.3 Deployment guide
-    - [ ] Build instructions
+  - [x] 12.3.3 Deployment guide
+    - [x] Build instructions
     - [ ] Distribution setup
     - [ ] Update mechanism
 
@@ -855,16 +905,19 @@ Upload → Classification → OCR/Parsing
 ## PART 7: DEPLOYMENT STRATEGY
 
 ### 7.1 Build Process
+
 - **Frontend:** Tauri build (native executables)
 - **Backend:** PyInstaller or Nuitka (standalone binary)
 - **Distribution:** Direct download (no app stores initially)
 
 ### 7.2 Update Mechanism
+
 - **Rules:** Auto-sync from server (optional)
 - **App:** Manual updates (download new version)
 - **Future:** Auto-update system (like Cursor)
 
 ### 7.3 Packaging
+
 - **Windows:** `.exe` installer (~200MB)
 - **macOS:** `.dmg` package (~200MB)
 - **Linux:** `.AppImage` or `.deb` (~200MB)
@@ -874,20 +927,23 @@ Upload → Classification → OCR/Parsing
 ## PART 8: SUCCESS METRICS
 
 ### Phase 1 (MVP)
+
 - [ ] 1 CA using daily
 - [ ] Can file 1 GST return end-to-end
 - [ ] <4 hours per month per client
 - [ ] CA approves all filings
 
 ### Phase 2 (MVP+)
+
 - [ ] 10 paying beta users
-- [ ] >80% OCR accuracy
-- [ ] >95% user approval rate
+- [ ] > 80% OCR accuracy
+- [ ] > 95% user approval rate
 - [ ] <$5 cost per filing
 
 ### Phase 3 (Launch)
+
 - [ ] 100+ active users
-- [ ] >70% feature adoption
+- [ ] > 70% feature adoption
 - [ ] NPS > 40
 - [ ] Churn < 5%/month
 
@@ -896,27 +952,35 @@ Upload → Classification → OCR/Parsing
 ## PART 9: RISK MITIGATION
 
 ### Risk 1: OCR Accuracy
+
 **Mitigation:**
+
 - Manual review UI for low-confidence extractions
 - Start with high-quality vendors
 - Continuous improvement from corrections
 
 ### Risk 2: Rule Accuracy
+
 **Mitigation:**
+
 - Start with basic rules only
 - CA review before filing
 - Conservative defaults
 - Cite every rule
 
 ### Risk 3: Privacy Breach
+
 **Mitigation:**
+
 - Context firewall mandatory
 - Audit logs from day 1
 - Regular security reviews
 - Transparent privacy policy
 
 ### Risk 4: Performance
+
 **Mitigation:**
+
 - Async processing
 - Caching strategies
 - Database optimization
@@ -927,11 +991,13 @@ Upload → Classification → OCR/Parsing
 ## PART 10: NEXT STEPS
 
 1. **This Week:**
+
    - Review and approve this TDR
    - Setup development environment
    - Initialize project structure
 
 2. **Week 1-2:**
+
    - Begin Phase 1 implementation
    - Setup all infrastructure
    - Create initial UI mockups
@@ -961,9 +1027,9 @@ Upload → Classification → OCR/Parsing
 **Document Status:** Finalized  
 **Last Updated:** 2024-12-15  
 **Next Review:** After Phase 1 completion
-```
 
 This TDR includes:
+
 - Finalized technical decisions with rationale
 - Database schemas for client and rules
 - 12-week implementation plan with nested steps

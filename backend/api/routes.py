@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from typing import Optional
 from api.workspace import router as workspace_router
 from api.privacy import router as privacy_router
+from api.llm import router as llm_router
+from api.documents import router as documents_router
 
 router = APIRouter()
 
@@ -22,6 +24,10 @@ async def health():
     return HealthResponse(status="healthy", service="CA AI Backend")
 
 # Include workspace routes
-router.include_router(workspace_router)
+router.include_router(workspace_router, tags=["workspace"])
 # Include privacy routes
-router.include_router(privacy_router)
+router.include_router(privacy_router, tags=["privacy"])
+# Include LLM routes
+router.include_router(llm_router, tags=["llm"])
+# Include document routes
+router.include_router(documents_router, tags=["documents"])

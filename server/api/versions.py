@@ -86,3 +86,65 @@ async def get_version(version: str, pool: DatabasePool = Depends(get_db_pool)):
         changelog=row["changelog"],
         rules_count=row["rules_count"],
     )
+
+
+@router.get("/versions/check-updates")
+async def check_updates(
+    current_version: Optional[str] = Query(None),
+    pool: DatabasePool = Depends(get_db_pool)
+):
+    """Check if there are updates available"""
+    
+    latest = await pool.fetchrow(
+        "SELECT * FROM gst_rule_versions ORDER BY released_at DESC LIMIT 1"
+    )
+    
+    if not latest:
+        return {
+            "has_update": False,
+            "current_version": current_version,
+            "latest_version": None
+        }
+    
+    latest_version = latest["version"]
+    has_update = current_version != latest_version if current_version else True
+    
+    return {
+        "has_update": has_update,
+        "current_version": current_version,
+        "latest_version": latest_version,
+        "latest_released_at": latest["released_at"].isoformat() if latest["released_at"] else None,
+        "changelog": latest["changelog"],
+        "rules_count": latest["rules_count"]
+    }
+
+
+@router.get("/versions/{version}/rules")
+async def get_rules_for_version(
+    version: str,
+    pool: DatabasePool = Depends(get_db_pool)
+):
+    """Get all rules for a specific version"""
+    from server.api.rules import RuleResponse
+    
+    rows = await pool.fetch(
+        "SELECT * FROM gst_rules WHERE version = $1 AND is_active = TRUE ORDER BY rule_id",
+        version
+    )
+    
+    return [
+        RuleResponse(
+            id=row["id"],
+            rule_id=row["rule_id"],
+            name=row["name"],
+            rule_text=row["rule_text"],
+            citation=row["citation"],
+            circular_number=row["circular_number"],
+            effective_from=row["effective_from"],
+            effective_to=row["effective_to"],
+            category=row["category"],
+            version=row["version"],
+            is_active=row["is_active"],
+        )
+        for row in rows
+    ]
