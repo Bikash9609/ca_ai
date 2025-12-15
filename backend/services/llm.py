@@ -22,6 +22,10 @@ except ImportError:
 from core.firewall import ContextFirewall
 from core.tools import ToolExecutor
 from core.privacy import AuditLogger
+from services.context_packer import ContextPacker
+from services.qa_tracking import QATracker
+from services.conversation import get_conversation_manager
+from database.connection import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +49,9 @@ class LLMService:
         tool_executor: ToolExecutor,
         audit_logger: Optional[AuditLogger] = None,
         api_key: Optional[str] = None,
-        provider: LLMProvider = LLMProvider.CLAUDE
+        provider: LLMProvider = LLMProvider.CLAUDE,
+        db_manager: Optional[DatabaseManager] = None,
+        client_id: Optional[str] = None
     ):
         """
         Initialize LLM service
@@ -56,6 +62,8 @@ class LLMService:
             audit_logger: Optional audit logger
             api_key: API key (provider-specific, or from env)
             provider: LLM provider to use
+            db_manager: Database manager for Q&A tracking
+            client_id: Client ID for Q&A tracking
         """
         if not LITELLM_AVAILABLE:
             raise ImportError("litellm is required. Install with: uv pip install litellm")
@@ -64,6 +72,7 @@ class LLMService:
         self.tool_executor = tool_executor
         self.audit_logger = audit_logger
         self.provider = provider
+        self.client_id = client_id
         
         # Get provider-specific API key and model name
         self.api_key = api_key or self._get_api_key_for_provider()
@@ -72,6 +81,15 @@ class LLMService:
         
         # Conversation history
         self.conversation_history: List[Dict[str, Any]] = []
+        
+        # Context packer and Q&A tracking
+        self.context_packer = ContextPacker()
+        self.qa_tracker = QATracker(db_manager) if db_manager else None
+        self.conversation_manager = get_conversation_manager()
+        
+        # Store last search chunks for context packing
+        self._last_search_chunks: List[Dict[str, Any]] = []
+        self._last_question: Optional[str] = None
         
         # System prompt
         self.system_prompt = self._build_system_prompt()
@@ -95,7 +113,10 @@ class LLMService:
         if self.provider == LLMProvider.CLAUDE:
             return os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
         elif self.provider == LLMProvider.GEMINI:
-            model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-002")
+            # Normalize older aliases to supported Vertex names
+            if model == "gemini-1.5-flash":
+                model = "gemini-1.5-flash-002"
             return f"gemini/{model}"
         elif self.provider == LLMProvider.GROQ:
             model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
@@ -110,18 +131,24 @@ class LLMService:
             return "gpt-3.5-turbo"  # Default fallback
     
     def _build_system_prompt(self) -> str:
-        """Build system prompt for CA assistant"""
-        return """
-        You are a CA's AI assistant for GST and TDS compliance and financial analysis.
+        """Build system prompt for CA assistant with safety measures"""
+        return """You are a CA's AI assistant for GST and TDS compliance and financial analysis.
 
 CORE PROTOCOL:
-1. MANDATORY: Call tools to retrieve data BEFORE answering. Never simulate actions.
-2. NO MANUAL MATH: Use `get_summary` or `get_tds_summary` for all tax/ITC/TDS calculations.
-3. READ-ONLY: You cannot see files, modify data, or save externally.
-4. ADVISORY ONLY: CA must approve all actions.
+1. MANDATORY: Use ONLY the provided context. Never assume facts not in context.
+2. ADVISORY ONLY: This is assistance, not professional advice. CA must approve all actions.
+3. UNCERTAINTY: If information is missing or unclear, state that explicitly.
+4. SOURCE CITATION: Reference page numbers and document types when possible.
+5. NO AUTO-DECISIONS: Never auto-file or auto-decide — always require CA approval.
+
+WHEN ANSWERING:
+- Cite page numbers: "Based on AWS invoices on pages 3–5..."
+- Mention uncertainty: "PAN not found in uploaded docs — please confirm"
+- Reference sources: "See chunk from document XYZ, page 3"
+- Highlight assumptions: "Assuming this refers to FY 2024-25 based on context"
 
 TOOLS (GST):
-- search_documents(query, doc_type, period)
+- search_documents(query, doc_type, period) -> Returns relevant chunks with page references
 - get_invoice(invoice_number, vendor_name)
 - get_summary(summary_type, period, category) -> PRIMARY for GST calc
 - get_reconciliation(source1, source2, period)
@@ -152,12 +179,12 @@ EXAMPLE FLOWS:
 GST: User: "Why is ITC blocked?"
      Action: Call `get_summary("itc_summary", ...)`
      Result: See Rule 36(4) flag.
-     Reply: "Blocked due to vendor non-filing (Rule 36(4))."
+     Reply: "Blocked due to vendor non-filing (Rule 36(4)). See page 12 of GSTR-2B document."
 
 TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
      Action: Call `get_tds_summary(summary_type="section_wise", period="2024-Q1", section="194A")`
      Result: Returns aggregated TDS data.
-     Reply: "Total TDS deducted under section 194A for Q1 2024 is ₹X from Y certificates."
+     Reply: "Total TDS deducted under section 194A for Q1 2024 is ₹X from Y certificates. See Form 16A documents, pages 3-5."
 """
     
     def _get_tool_definitions(self) -> List[Dict[str, Any]]:
@@ -493,6 +520,9 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                 "content": str | Dict
             }
         """
+        # Store question for Q&A tracking
+        self._last_question = query
+        
         # Add user message to history
         self.conversation_history.append({
             "role": "user",
@@ -527,8 +557,7 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
             
             # Process streaming response
             current_text = ""
-            tool_calls = []
-            tool_call_id_map = {}  # Map tool call index to ID
+            tool_calls = {}
             
             async for chunk in response:
                 if not hasattr(chunk, 'choices') or not chunk.choices:
@@ -552,13 +581,11 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                             
                             # Initialize tool call if needed
                             if idx not in tool_calls:
-                                tool_calls.append({
+                                tool_calls[idx] = {
                                     "id": tool_call_delta.id or f"call_{idx}",
                                     "name": "",
                                     "arguments": ""
-                                })
-                                if tool_call_delta.id:
-                                    tool_call_id_map[idx] = tool_call_delta.id
+                                }
                             
                             # Update tool call
                             if hasattr(tool_call_delta, 'function') and tool_call_delta.function:
@@ -570,7 +597,8 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                 # Check if finished with tool calls
                 if hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason == "tool_calls":
                     # Execute tool calls
-                    for tool_call in tool_calls:
+                    for idx in sorted(tool_calls.keys()):
+                        tool_call = tool_calls[idx]
                         if not tool_call or not tool_call["name"]:
                             continue
                         
@@ -642,14 +670,28 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                             
                             follow_up_response = await litellm.acompletion(**follow_up_params)
                             
+                            follow_up_text = ""
                             async for follow_up_chunk in follow_up_response:
                                 if hasattr(follow_up_chunk, 'choices') and follow_up_chunk.choices:
                                     delta = follow_up_chunk.choices[0].delta
                                     if hasattr(delta, 'content') and delta.content:
+                                        follow_up_text += delta.content
                                         yield {
                                             "type": "text",
                                             "content": delta.content
                                         }
+                            
+                            # Ensure assistant message is recorded even if no further text streamed
+                            if follow_up_text:
+                                self.conversation_history.append({
+                                    "role": "assistant",
+                                    "content": follow_up_text
+                                })
+                            else:
+                                yield {
+                                    "type": "text",
+                                    "content": "No relevant TDS findings were returned from the documents."
+                                }
                         else:
                             yield {
                                 "type": "error",
@@ -662,6 +704,30 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                     "role": "assistant",
                     "content": current_text
                 })
+                
+                # Track Q&A if tracker available
+                if self.qa_tracker and self.client_id and self._last_search_chunks:
+                    chunk_ids = [chunk.get("chunk_id") for chunk in self._last_search_chunks if chunk.get("chunk_id")]
+                    if chunk_ids:
+                        try:
+                            await self.qa_tracker.store_qa(
+                                client_id=self.client_id,
+                                question=self._last_question or query,
+                                answer=current_text,
+                                chunk_ids=chunk_ids,
+                                model_version=self.model_name
+                            )
+                        except Exception as e:
+                            logger.warning(f"Could not store Q&A: {e}")
+                
+                # Update conversation context
+                if self.client_id and self._last_search_chunks:
+                    conv_context = self.conversation_manager.get_context(self.client_id)
+                    conv_context.add_question(
+                        question=self._last_question or query,
+                        context_chunks=self._last_search_chunks,
+                        answer=current_text
+                    )
         
         except Exception as e:
             logger.error(f"Error processing query: {e}", exc_info=True)
@@ -669,6 +735,9 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                 "type": "error",
                 "content": f"Error: {str(e)}"
             }
+        finally:
+            # Clear temporary state
+            self._last_question = None
     
     def _build_messages(self) -> List[Dict[str, Any]]:
         """Build messages list from conversation history for LiteLLM"""
@@ -729,12 +798,16 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
     async def _execute_tool(self, tool_name: str, params: Dict[str, Any]) -> Any:
         """Execute a tool (called through firewall)"""
         if tool_name == "search_documents":
-            return await self.tool_executor.search_documents(
+            result = await self.tool_executor.search_documents(
                 query=params.get("query", ""),
                 doc_type=params.get("doc_type"),
                 period=params.get("period"),
-                limit=params.get("limit", 20)
+                limit=params.get("limit", 20),
+                use_multi_pass=True
             )
+            # Store chunks for context packing
+            self._last_search_chunks = result.get("chunks", [])
+            return result
         elif tool_name == "get_invoice":
             return await self.tool_executor.get_invoice(
                 invoice_number=params.get("invoice_number"),

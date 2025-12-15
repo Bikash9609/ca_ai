@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import {
   Card,
   CardBody,
-  CardHeader,
   Input,
   Select,
   SelectItem,
@@ -16,6 +15,7 @@ import {
   Chip,
 } from "@heroui/react";
 import { useWorkspace } from "../hooks/useWorkspace";
+import { api } from "../services/api";
 
 interface Document {
   id: string;
@@ -95,7 +95,6 @@ export default function Documents() {
     if (e.target.files && e.target.files.length > 0) {
       await handleFiles(Array.from(e.target.files));
     }
-    // Reset input value to allow selecting the same file again
     if (e.target) {
       e.target.value = "";
     }
@@ -104,7 +103,6 @@ export default function Documents() {
   const handleFiles = async (files: File[]) => {
     if (!currentClient) return;
 
-    // Initialize upload states for all files
     const newUploadStates = new Map(uploadStates);
     files.forEach((file) => {
       newUploadStates.set(file.name, {
@@ -114,7 +112,6 @@ export default function Documents() {
     });
     setUploadStates(newUploadStates);
 
-    // Upload each file individually to track per-file status
     for (const file of files) {
       const formData = new FormData();
       formData.append("files", file);
@@ -176,7 +173,6 @@ export default function Documents() {
   const retryUpload = async (fileName: string) => {
     const uploadState = uploadStates.get(fileName);
     if (!uploadState) return;
-
     await handleFiles([uploadState.file]);
   };
 
@@ -186,6 +182,53 @@ export default function Documents() {
       updated.delete(fileName);
       return updated;
     });
+  };
+
+  const handleDeleteDocument = async (documentId: string) => {
+    console.log("handleDeleteDocument called", { documentId, currentClient });
+
+    if (!currentClient) {
+      console.error("No current client");
+      return;
+    }
+
+    if (
+      !confirm(
+        `Are you sure you want to delete this document? This will permanently remove the document and all its data.`
+      )
+    ) {
+      console.log("User cancelled deletion");
+      return;
+    }
+
+    console.log("Proceeding with deletion...");
+
+    try {
+      console.log("Calling API delete...", {
+        documentId,
+        clientId: currentClient.id,
+      });
+      const result = await api.documents.delete(documentId, currentClient.id);
+      console.log("Delete result:", result);
+
+      if (result.error) {
+        console.error("Delete error:", result.error);
+        alert(`Failed to delete document: ${result.error}`);
+      } else if (result.data) {
+        console.log("Delete successful, reloading documents");
+        await loadDocuments();
+      } else {
+        console.log(
+          "Delete successful (no data returned), reloading documents"
+        );
+        await loadDocuments();
+      }
+    } catch (error) {
+      console.error("Delete exception:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      alert(`Failed to delete document: ${errorMessage}`);
+    }
   };
 
   const filteredDocuments = documents.filter((doc) => {
@@ -202,19 +245,29 @@ export default function Documents() {
 
   if (!currentClient) {
     return (
-      <div className="p-6">
+      <div className="flex items-center justify-center h-screen">
         <div className="text-center text-default-500">
-          Please select a client to view documents
+          <p className="text-lg mb-2">
+            Please select a client to view documents
+          </p>
+          <p className="text-sm">
+            Go to Clients page to create or select a client
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold text-foreground">
-        Document Management
-      </h1>
+    <div className="p-8 max-w-7xl mx-auto space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-foreground mb-2">
+          Document Management
+        </h1>
+        <p className="text-default-600">
+          Upload and manage documents for {currentClient.name}
+        </p>
+      </div>
 
       {/* Upload Area */}
       <Card
@@ -223,14 +276,14 @@ export default function Documents() {
         onDragOver={handleDrag}
         onDrop={handleDrop}
         classNames={{
-          base: `border-2 border-dashed p-8 text-center ${
+          base: `border-2 border-dashed transition-colors ${
             dragActive
               ? "border-primary bg-primary-50"
               : "border-default-300 bg-default-50"
           }`,
         }}
       >
-        <CardBody>
+        <CardBody className="p-12 text-center">
           <input
             ref={fileInputRef}
             type="file"
@@ -241,9 +294,9 @@ export default function Documents() {
             style={{ display: "none" }}
           />
           <div className="space-y-4">
-            <div className="text-4xl">📄</div>
+            <div className="text-5xl">📄</div>
             <div>
-              <p className="text-lg font-medium text-foreground">
+              <p className="text-lg font-medium text-foreground mb-2">
                 Drag and drop files here, or{" "}
                 <button
                   type="button"
@@ -259,7 +312,7 @@ export default function Documents() {
                   browse
                 </button>
               </p>
-              <p className="text-sm text-default-500 mt-2">
+              <p className="text-sm text-default-500">
                 Supports PDF, Images, Excel files
               </p>
             </div>
@@ -270,73 +323,64 @@ export default function Documents() {
       {/* Upload Status */}
       {uploadStates.size > 0 && (
         <Card classNames={{ base: "border border-default-200" }}>
-          <CardHeader>
-            <h3 className="text-sm font-semibold text-foreground">
-              Upload Status
-            </h3>
-          </CardHeader>
-          <CardBody className="space-y-2">
+          <CardBody className="p-4 space-y-2">
             {Array.from(uploadStates.entries()).map(
               ([fileName, uploadState]) => (
-                <Card
+                <div
                   key={fileName}
-                  classNames={{ base: "border border-default-200" }}
+                  className="flex items-center justify-between p-3 bg-default-50 rounded-lg"
                 >
-                  <CardBody>
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-foreground truncate">
-                            {fileName}
-                          </span>
-                          {uploadState.status === "uploading" && (
-                            <Chip size="sm" color="primary">
-                              Uploading...
-                            </Chip>
-                          )}
-                          {uploadState.status === "success" && (
-                            <Chip size="sm" color="success">
-                              ✓ Uploaded
-                            </Chip>
-                          )}
-                          {uploadState.status === "error" && (
-                            <Chip size="sm" color="danger">
-                              ✗ Failed
-                            </Chip>
-                          )}
-                        </div>
-                        {uploadState.status === "error" &&
-                          uploadState.errorMessage && (
-                            <div className="mt-1 text-xs text-danger">
-                              {uploadState.errorMessage}
-                            </div>
-                          )}
-                      </div>
-                      <div className="flex items-center gap-2 ml-4">
-                        {uploadState.status === "error" && (
-                          <Button
-                            size="sm"
-                            variant="light"
-                            color="primary"
-                            onPress={() => retryUpload(fileName)}
-                          >
-                            Retry
-                          </Button>
-                        )}
-                        {(uploadState.status === "success" ||
-                          uploadState.status === "error") && (
-                          <Button
-                            size="sm"
-                            variant="light"
-                            onPress={() => clearUploadState(fileName)}
-                          >
-                            Dismiss
-                          </Button>
-                        )}
-                      </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-foreground truncate">
+                        {fileName}
+                      </span>
+                      {uploadState.status === "uploading" && (
+                        <Chip size="sm" color="primary">
+                          Uploading...
+                        </Chip>
+                      )}
+                      {uploadState.status === "success" && (
+                        <Chip size="sm" color="success">
+                          ✓ Uploaded
+                        </Chip>
+                      )}
+                      {uploadState.status === "error" && (
+                        <Chip size="sm" color="danger">
+                          ✗ Failed
+                        </Chip>
+                      )}
                     </div>
-                  </CardBody>
-                </Card>
+                    {uploadState.status === "error" &&
+                      uploadState.errorMessage && (
+                        <div className="mt-1 text-xs text-danger">
+                          {uploadState.errorMessage}
+                        </div>
+                      )}
+                  </div>
+                  <div className="flex items-center gap-2 ml-4">
+                    {uploadState.status === "error" && (
+                      <Button
+                        size="sm"
+                        variant="light"
+                        color="primary"
+                        onPress={() => retryUpload(fileName)}
+                      >
+                        Retry
+                      </Button>
+                    )}
+                    {(uploadState.status === "success" ||
+                      uploadState.status === "error") && (
+                      <Button
+                        size="sm"
+                        variant="light"
+                        onPress={() => clearUploadState(fileName)}
+                      >
+                        Dismiss
+                      </Button>
+                    )}
+                  </div>
+                </div>
               )
             )}
           </CardBody>
@@ -345,7 +389,7 @@ export default function Documents() {
 
       {/* Filters */}
       <Card classNames={{ base: "border border-default-200" }}>
-        <CardBody>
+        <CardBody className="p-4">
           <div className="flex gap-4 items-end">
             <div className="flex-1">
               <Input
@@ -429,8 +473,20 @@ export default function Documents() {
                   </Chip>
                 </TableCell>
                 <TableCell>
-                  <Button size="sm" variant="light" color="primary">
-                    View
+                  <Button
+                    size="sm"
+                    color="danger"
+                    variant="light"
+                    onPress={() => {
+                      console.log(
+                        "Delete button clicked for document:",
+                        doc.id
+                      );
+                      handleDeleteDocument(doc.id);
+                    }}
+                    isDisabled={loading}
+                  >
+                    Delete
                   </Button>
                 </TableCell>
               </TableRow>

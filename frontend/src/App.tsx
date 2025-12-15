@@ -13,7 +13,7 @@ function App() {
   return (
     <div className="min-h-screen bg-background flex">
       <Navigation />
-      <main className="flex-1 ml-64">
+      <main className="flex-1 ml-56">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/clients" element={<Clients />} />

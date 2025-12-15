@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime
 
 from database.connection import DatabaseManager
+from services.entity_extraction import EntityExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -224,12 +225,14 @@ class DocumentIndexer:
         self.embedding_gen = embedding_generator
         self.chunker = chunker
         self.vector_storage = VectorStorage(db_manager)
+        self.entity_extractor = EntityExtractor()
     
     async def index_document(
         self,
         document_id: str,
         text: str,
-        document_metadata: Optional[Dict[str, Any]] = None
+        document_metadata: Optional[Dict[str, Any]] = None,
+        parsed_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Index a document (chunk, embed, and store)
@@ -238,13 +241,14 @@ class DocumentIndexer:
             document_id: Document ID
             text: Document text
             document_metadata: Document metadata
+            parsed_data: Parsed document data (with page/table info) for smart chunking
         
         Returns:
             Indexing result with chunk count
         """
         # Chunk the document
         print(f"[INDEXING] Step 1: Chunking document {document_id}")
-        chunks = self.chunker.chunk_document(document_id, text, document_metadata)
+        chunks = self.chunker.chunk_document(document_id, text, document_metadata, parsed_data)
         
         if not chunks:
             logger.warning(f"No chunks created for document {document_id}")
@@ -254,6 +258,11 @@ class DocumentIndexer:
         print(f"[INDEXING] Chunking completed. Created {len(chunks)} chunks")
         chunk_indexes = [chunk.get("chunk_index", i) for i, chunk in enumerate(chunks)]
         print(f"[INDEXING] Generated chunk indexes: {chunk_indexes}")
+        
+        # Extract entities from chunks
+        print(f"[INDEXING] Step 1.5: Extracting entities from chunks")
+        chunks = self.entity_extractor.extract_from_chunks(chunks)
+        print(f"[INDEXING] Entity extraction completed")
         
         # Generate embeddings for chunks
         print(f"[INDEXING] Step 2: Generating embeddings for {len(chunks)} chunks")
@@ -270,12 +279,63 @@ class DocumentIndexer:
         )
         
         print(f"[INDEXING] Storage completed. Stored {len(chunk_ids)} chunks with IDs: {chunk_ids}")
+        
+        # Store page mappings if available
+        if parsed_data and "page_texts" in parsed_data:
+            await self._store_page_mappings(document_id, chunks, parsed_data["page_texts"])
+        
         logger.info(f"Indexed document {document_id}: {len(chunk_ids)} chunks")
         
         return {
             "chunks_created": len(chunk_ids),
             "chunk_ids": chunk_ids
         }
+    
+    async def _store_page_mappings(
+        self,
+        document_id: str,
+        chunks: List[Dict[str, Any]],
+        page_texts: List[Dict[str, Any]]
+    ) -> None:
+        """Store page mappings for a document"""
+        try:
+            # Group chunks by page
+            chunks_by_page = {}
+            for chunk in chunks:
+                page = chunk.get("metadata", {}).get("page")
+                if page:
+                    if page not in chunks_by_page:
+                        chunks_by_page[page] = []
+                    chunks_by_page[page].append(chunk)
+            
+            # Store page mappings
+            for page_info in page_texts:
+                page_num = page_info.get("page", 0)
+                if page_num == 0:
+                    continue
+                
+                page_chunks = chunks_by_page.get(page_num, [])
+                if not page_chunks:
+                    continue
+                
+                chunk_indexes = [chunk.get("chunk_index", 0) for chunk in page_chunks]
+                start_chunk = min(chunk_indexes) if chunk_indexes else None
+                end_chunk = max(chunk_indexes) if chunk_indexes else None
+                text_preview = page_info.get("text", "")[:200]  # First 200 chars
+                
+                query = """
+                    INSERT OR REPLACE INTO document_pages 
+                    (document_id, page_number, start_chunk_index, end_chunk_index, text_preview)
+                    VALUES (?, ?, ?, ?, ?)
+                """
+                await self.db.execute(
+                    query,
+                    (document_id, page_num, start_chunk, end_chunk, text_preview)
+                )
+            
+            logger.debug(f"Stored page mappings for document {document_id}")
+        except Exception as e:
+            logger.warning(f"Could not store page mappings: {e}")
     
     async def reindex_document(
         self,

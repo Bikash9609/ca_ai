@@ -8,13 +8,23 @@ import logging
 from pathlib import Path
 import hashlib
 import json
+import os
 
 try:
     from sentence_transformers import SentenceTransformer
+    import huggingface_hub
 except ImportError:
     SentenceTransformer = None
+    huggingface_hub = None
 
 logger = logging.getLogger(__name__)
+
+# Import cache if available
+try:
+    from services.cache import get_embedding_cache
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
 
 
 class EmbeddingGenerator:
@@ -37,23 +47,39 @@ class EmbeddingGenerator:
         self.model_name = model_name or self.DEFAULT_MODEL
         self.cache_dir = cache_dir
         
+        # Configure Hugging Face Hub timeouts
+        if huggingface_hub:
+            os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "300")
+            os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT_STREAMING", "300")
+        
         # Load model (will download and cache if needed)
         try:
-            if cache_dir:
-                self.model = SentenceTransformer(self.model_name, cache_folder=str(cache_dir))
-            else:
-                self.model = SentenceTransformer(self.model_name)
-            logger.info(f"Loaded embedding model: {self.model_name}")
+            # Try offline mode first if model might be cached
+            try:
+                if cache_dir:
+                    self.model = SentenceTransformer(self.model_name, cache_folder=str(cache_dir), local_files_only=True)
+                else:
+                    self.model = SentenceTransformer(self.model_name, local_files_only=True)
+                logger.info(f"Loaded embedding model from cache: {self.model_name}")
+            except Exception:
+                # If offline fails, try online with longer timeout
+                logger.info(f"Model not in cache, downloading: {self.model_name}")
+                if cache_dir:
+                    self.model = SentenceTransformer(self.model_name, cache_folder=str(cache_dir))
+                else:
+                    self.model = SentenceTransformer(self.model_name)
+                logger.info(f"Loaded embedding model: {self.model_name}")
         except Exception as e:
             logger.error(f"Error loading embedding model: {e}")
             raise
     
-    def generate(self, text: str) -> np.ndarray:
+    def generate(self, text: str, use_cache: bool = True) -> np.ndarray:
         """
         Generate embedding for a single text
         
         Args:
             text: Input text
+            use_cache: Whether to use cache (default: True)
         
         Returns:
             Embedding vector as numpy array
@@ -62,9 +88,23 @@ class EmbeddingGenerator:
             # Return zero vector for empty text
             return np.zeros(self.EMBEDDING_DIM, dtype=np.float32)
         
+        # Check cache if enabled
+        if use_cache and CACHE_AVAILABLE and os.getenv("ENABLE_CACHE", "true").lower() == "true":
+            embedding_cache = get_embedding_cache()
+            cached = embedding_cache.get(text)
+            if cached is not None:
+                return cached
+        
         try:
             embedding = self.model.encode(text, convert_to_numpy=True, normalize_embeddings=True)
-            return embedding.astype(np.float32)
+            embedding = embedding.astype(np.float32)
+            
+            # Cache if enabled
+            if use_cache and CACHE_AVAILABLE and os.getenv("ENABLE_CACHE", "true").lower() == "true":
+                embedding_cache = get_embedding_cache()
+                embedding_cache.set(text, embedding)
+            
+            return embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
             # Return zero vector on error

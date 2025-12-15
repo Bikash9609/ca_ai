@@ -62,17 +62,16 @@ class DatabaseManager:
         )
         table_exists = await cursor.fetchone()
         
-        if not table_exists:
+        migrations_dir = Path(__file__).parent / "migrations"
+        schema_file = Path(__file__).parent / "schema.sql"
+
+        # Always run migrations when available so newer tables (e.g., conversations)
+        # are added even on already-initialized databases.
+        if migrations_dir.exists():
+            await self.run_migrations(migrations_dir)
+        elif not table_exists and schema_file.exists():
             logger.info("Initializing database schema...")
-            # Use migration system to initialize schema
-            migrations_dir = Path(__file__).parent / "migrations"
-            if migrations_dir.exists():
-                await self.run_migrations(migrations_dir)
-            else:
-                # Fallback: use schema.sql if migrations don't exist
-                schema_file = Path(__file__).parent / "schema.sql"
-                if schema_file.exists():
-                    await self.initialize_schema(schema_file)
+            await self.initialize_schema(schema_file)
         
         self._schema_initialized = True
     

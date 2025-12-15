@@ -253,6 +253,29 @@ class PDFParser:
             raise
     
     @staticmethod
+    def extract_text_with_pages(file_path: Path) -> List[Dict[str, Any]]:
+        """Extract text from PDF with page information"""
+        if pdfplumber is None:
+            raise ImportError("pdfplumber is required for PDF parsing")
+        
+        try:
+            page_texts = []
+            with pdfplumber.open(file_path) as pdf:
+                for page_num, page in enumerate(pdf.pages, 1):
+                    text = page.extract_text()
+                    if text:
+                        page_texts.append({
+                            "page": page_num,
+                            "text": text,
+                            "start_char": sum(len(p["text"]) + 2 for p in page_texts),  # +2 for \n\n
+                            "end_char": sum(len(p["text"]) + 2 for p in page_texts) + len(text)
+                        })
+            return page_texts
+        except Exception as e:
+            logger.error(f"Error extracting text with pages from PDF: {e}")
+            raise
+    
+    @staticmethod
     def extract_tables(file_path: Path) -> List[Dict[str, Any]]:
         """Extract tables from PDF"""
         if pdfplumber is None:
@@ -307,12 +330,14 @@ class PDFParser:
             text = PDFParser.extract_text(file_path)
             tables = PDFParser.extract_tables(file_path)
             form_fields = PDFParser.extract_form_fields(file_path)
+            page_texts = PDFParser.extract_text_with_pages(file_path)
             
             return {
                 "text": text,
                 "tables": tables,
                 "form_fields": form_fields,
-                "total_pages": len(tables) if tables else 0,
+                "page_texts": page_texts,  # New: structured page data
+                "total_pages": len(page_texts) if page_texts else (len(tables) if tables else 0),
                 "has_text": bool(text),
                 "has_tables": len(tables) > 0,
                 "has_form_fields": len(form_fields) > 0

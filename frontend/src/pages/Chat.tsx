@@ -1,15 +1,20 @@
 import { useState, useEffect, useRef } from "react";
 import {
+  Button,
+  Spinner,
+  Modal,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  Input,
   Select,
   SelectItem,
-  Input,
-  Textarea,
-  Button,
-  Card,
-  CardBody,
-  Spinner,
 } from "@heroui/react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useWorkspace } from "../hooks/useWorkspace";
+import { api } from "../services/api";
 
 interface Message {
   id: string;
@@ -24,12 +29,27 @@ interface Message {
   error?: string;
 }
 
+interface Conversation {
+  id: string;
+  title: string;
+  provider: string;
+  created_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+}
+
 export default function Chat() {
   const { currentClient } = useWorkspace();
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [currentConversationId, setCurrentConversationId] = useState<
+    string | null
+  >(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [provider, setProvider] = useState<
     "claude" | "ollama" | "gemini" | "groq" | "openrouter"
   >("claude");
@@ -38,15 +58,111 @@ export default function Chat() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    if (currentClient) {
+      loadConversations();
+    }
+  }, [currentClient]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    if (currentConversationId && currentClient) {
+      loadConversation(currentConversationId);
+    }
+  }, [currentConversationId, currentClient]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  const loadConversations = async () => {
+    if (!currentClient) return;
+    try {
+      const response = await api.chat.conversations.list(currentClient.id);
+      if (response.data) {
+        setConversations(response.data.conversations);
+      }
+    } catch (error) {
+      console.error("Failed to load conversations:", error);
+    }
+  };
+
+  const loadConversation = async (conversationId: string) => {
+    if (!currentClient) return;
+    try {
+      const response = await api.chat.conversations.get(
+        conversationId,
+        currentClient.id
+      );
+      if (response.data) {
+        const loadedMessages: Message[] = response.data.messages.map(
+          (msg: any) => ({
+            id: msg.id,
+            role: msg.role as "user" | "assistant" | "system",
+            content: msg.content,
+            timestamp: new Date(msg.created_at),
+            toolCalls: msg.tool_calls || [],
+          })
+        );
+        setMessages(loadedMessages);
+      }
+    } catch (error) {
+      console.error("Failed to load conversation:", error);
+    }
+  };
+
+  const createNewConversation = async () => {
+    if (!currentClient) return;
+    try {
+      const response = await api.chat.conversations.create({
+        client_id: currentClient.id,
+        provider: provider,
+      });
+      if (response.data) {
+        setCurrentConversationId(response.data.id);
+        setMessages([]);
+        await loadConversations();
+      }
+    } catch (error) {
+      console.error("Failed to create conversation:", error);
+    }
+  };
+
+  const deleteConversation = async (conversationId: string) => {
+    if (!currentClient) return;
+    try {
+      await api.chat.conversations.delete(conversationId, currentClient.id);
+      if (currentConversationId === conversationId) {
+        setCurrentConversationId(null);
+        setMessages([]);
+      }
+      await loadConversations();
+    } catch (error) {
+      console.error("Failed to delete conversation:", error);
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim() || !currentClient || loading) return;
+
+    // Create conversation if none exists
+    let convId = currentConversationId;
+    if (!convId) {
+      const createResponse = await api.chat.conversations.create({
+        client_id: currentClient.id,
+        provider: provider,
+      });
+      if (createResponse.data) {
+        convId = createResponse.data.id;
+        setCurrentConversationId(convId);
+        await loadConversations();
+      } else {
+        setError("Failed to create conversation");
+        return;
+      }
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -60,7 +176,6 @@ export default function Chat() {
     setLoading(true);
     setError(null);
 
-    // Create abort controller for cancellation
     abortControllerRef.current = new AbortController();
 
     try {
@@ -162,9 +277,12 @@ export default function Chat() {
           }
         }
       }
+
+      // Save messages to conversation (simplified - in production, save after each message)
+      // For now, we'll rely on the backend to maintain state
     } catch (err: any) {
       if (err.name === "AbortError") {
-        return; // User cancelled
+        return;
       }
       setError(err.message || "Failed to send message");
       setMessages((prev) => {
@@ -195,67 +313,202 @@ export default function Chat() {
     }
   };
 
-  const clearHistory = async () => {
-    if (!currentClient) return;
-    try {
-      await fetch("http://localhost:8000/api/chat/history/clear", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_id: currentClient.id,
-          provider: provider,
-        }),
-      });
-      setMessages([]);
-    } catch (err) {
-      console.error("Failed to clear history:", err);
-    }
-  };
-
-  const exportConversation = () => {
-    const data = {
-      messages: messages,
-      exported_at: new Date().toISOString(),
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `conversation_${new Date().toISOString().split("T")[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   if (!currentClient) {
     return (
-      <div className="p-6">
+      <div className="flex items-center justify-center h-screen">
         <div className="text-center text-default-500">
-          Please select a client to start chatting
+          <p className="text-lg mb-2">
+            Please select a client to start chatting
+          </p>
+          <p className="text-sm">
+            Go to Clients page to create or select a client
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-screen">
-      {/* Header */}
-      <div className="border-b border-default-200 bg-background p-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-foreground">
-            Chat Assistant
-          </h1>
-          <div className="flex items-center gap-4">
+    <div className="flex h-screen bg-background">
+      {/* Conversation History Sidebar */}
+      {sidebarOpen && (
+        <div className="w-64 border-r border-default-200 bg-default-50 flex flex-col">
+          <div className="p-4 border-b border-default-200">
+            <Button
+              color="primary"
+              size="sm"
+              className="w-full"
+              onPress={createNewConversation}
+            >
+              + New Chat
+            </Button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {conversations.length === 0 ? (
+              <div className="text-center text-default-500 text-sm py-8">
+                No conversations yet
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {conversations.map((conv) => (
+                  <div
+                    key={conv.id}
+                    className={`group relative p-3 rounded-lg cursor-pointer transition-colors ${
+                      currentConversationId === conv.id
+                        ? "bg-primary text-primary-foreground"
+                        : "hover:bg-default-100"
+                    }`}
+                    onClick={() => setCurrentConversationId(conv.id)}
+                  >
+                    <div className="font-medium text-sm truncate">
+                      {conv.title}
+                    </div>
+                    <div
+                      className={`text-xs mt-1 ${
+                        currentConversationId === conv.id
+                          ? "opacity-80"
+                          : "text-default-500"
+                      }`}
+                    >
+                      {new Date(conv.updated_at).toLocaleDateString()}
+                    </div>
+                    {currentConversationId === conv.id && (
+                      <button
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-xs w-6 h-6 rounded hover:bg-white hover:bg-opacity-20 flex items-center justify-center transition-opacity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteConversation(conv.id);
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="border-b border-default-200 bg-background px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Button
+              size="sm"
+              variant="light"
+              onPress={() => setSidebarOpen(!sidebarOpen)}
+            >
+              {sidebarOpen ? "←" : "☰"}
+            </Button>
+            <h1 className="text-lg font-semibold text-foreground">
+              {currentClient.name}
+            </h1>
+          </div>
+          <Button
+            size="sm"
+            variant="light"
+            onPress={() => setSettingsOpen(true)}
+          >
+            Settings
+          </Button>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-6">
+          {messages.length === 0 && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center text-default-500 max-w-md">
+                <p className="text-lg mb-2">Start a conversation</p>
+                <p className="text-sm">
+                  Ask questions about your client's documents and GST compliance
+                </p>
+              </div>
+            </div>
+          )}
+          <div className="max-w-4xl mx-auto space-y-6">
+            {messages.map((message) => (
+              <MessageBubble key={message.id} message={message} />
+            ))}
+            {loading && (
+              <div className="flex items-center gap-2 text-default-500">
+                <Spinner size="sm" color="primary" />
+                <span>Thinking...</span>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="mx-4 mb-2 p-3 bg-danger-50 border border-danger-200 rounded-lg text-danger-700 text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* Input Area */}
+        <div className="border-t border-default-200 bg-background p-4">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex gap-2 items-end">
+              <div className="flex-1 relative">
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Ask a question..."
+                  className="w-full px-4 py-3 pr-12 border border-default-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-background text-foreground"
+                  rows={1}
+                  style={{
+                    minHeight: "48px",
+                    maxHeight: "200px",
+                  }}
+                  disabled={loading}
+                  onInput={(e) => {
+                    const target = e.target as HTMLTextAreaElement;
+                    target.style.height = "auto";
+                    target.style.height = `${Math.min(
+                      target.scrollHeight,
+                      200
+                    )}px`;
+                  }}
+                />
+              </div>
+              {loading ? (
+                <Button color="danger" onPress={handleCancel} size="lg">
+                  Cancel
+                </Button>
+              ) : (
+                <Button
+                  color="primary"
+                  onPress={handleSend}
+                  isDisabled={!input.trim() || loading}
+                  size="lg"
+                >
+                  Send
+                </Button>
+              )}
+            </div>
+            <div className="text-xs text-default-500 mt-2 text-center">
+              Press Enter to send, Shift+Enter for new line
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Settings Modal */}
+      <Modal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)}>
+        <ModalContent>
+          <ModalHeader>Settings</ModalHeader>
+          <ModalBody>
             <Select
+              label="LLM Provider"
               selectedKeys={[provider]}
               onSelectionChange={(keys) => {
                 const selected = Array.from(keys)[0] as string;
                 setProvider(selected as typeof provider);
-              }}
-              className="w-40"
-              classNames={{
-                base: "w-40",
               }}
             >
               <SelectItem key="claude" value="claude">
@@ -277,101 +530,22 @@ export default function Chat() {
             {provider !== "ollama" && (
               <Input
                 type="password"
+                label="API Key"
                 placeholder={`API Key${
                   provider === "claude" ? " (optional)" : ""
                 }`}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                className="w-48"
-                classNames={{
-                  base: "w-48",
-                }}
               />
             )}
-            <Button size="sm" variant="flat" onPress={clearHistory}>
-              Clear
+          </ModalBody>
+          <ModalFooter>
+            <Button color="primary" onPress={() => setSettingsOpen(false)}>
+              Save
             </Button>
-            <Button size="sm" variant="flat" onPress={exportConversation}>
-              Export
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
-          <div className="text-center text-default-500 mt-8">
-            Start a conversation by asking a question about GST compliance
-          </div>
-        )}
-        {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
-        ))}
-        {loading && (
-          <div className="flex items-center gap-2 text-default-500">
-            <Spinner size="sm" color="primary" />
-            <span>Thinking...</span>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Error Display */}
-      {error && (
-        <Card
-          className="mx-4 mb-2 border-l-4 border-l-danger"
-          classNames={{ base: "bg-danger-50 border-l-4 border-l-danger" }}
-        >
-          <CardBody>
-            <div className="flex items-center justify-between">
-              <div className="text-danger-700">{error}</div>
-              <Button
-                size="sm"
-                variant="light"
-                isIconOnly
-                onPress={() => setError(null)}
-              >
-                ×
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
-      )}
-
-      {/* Input Area */}
-      <div className="border-t border-default-200 bg-background p-4">
-        <div className="flex gap-2">
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask a question about GST compliance..."
-            className="flex-1"
-            minRows={3}
-            isDisabled={loading}
-          />
-          <div className="flex flex-col gap-2">
-            {loading ? (
-              <Button color="danger" onPress={handleCancel} className="h-full">
-                Cancel
-              </Button>
-            ) : (
-              <Button
-                color="primary"
-                onPress={handleSend}
-                isDisabled={!input.trim() || loading}
-                className="h-full"
-              >
-                Send
-              </Button>
-            )}
-          </div>
-        </div>
-        <div className="text-xs text-default-500 mt-2">
-          Press Enter to send, Shift+Enter for new line
-        </div>
-      </div>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </div>
   );
 }
@@ -381,145 +555,49 @@ function MessageBubble({ message }: { message: Message }) {
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <Card
-        className={`max-w-3xl ${
+      <div
+        className={`max-w-[85%] rounded-lg px-4 py-3 shadow-sm ${
           isUser
             ? "bg-primary text-primary-foreground"
-            : "bg-default-100 text-foreground"
+            : "bg-default-100 text-foreground border border-default-200"
         }`}
-        classNames={{
-          base: `max-w-3xl border border-default-200 ${
-            isUser
-              ? "bg-primary text-primary-foreground"
-              : "bg-default-100 text-foreground"
-          }`,
-        }}
       >
-        <CardBody className="p-4">
-          {message.toolCalls && message.toolCalls.length > 0 && (
-            <div className="mb-2 space-y-1">
-              {message.toolCalls.map((toolCall, idx) => (
-                <div
-                  key={idx}
-                  className={`text-xs rounded px-2 py-1 ${
-                    isUser ? "bg-white bg-opacity-20" : "bg-default-200"
-                  }`}
-                >
-                  🔧 {toolCall.tool}
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="whitespace-pre-wrap">
-            <MarkdownRenderer content={message.content} />
+        {message.toolCalls && message.toolCalls.length > 0 && (
+          <div className="mb-2 space-y-1">
+            {message.toolCalls.map((toolCall, idx) => (
+              <div
+                key={idx}
+                className={`text-xs rounded px-2 py-1 ${
+                  isUser ? "bg-white bg-opacity-20" : "bg-default-200"
+                }`}
+              >
+                🔧 {toolCall.tool}
+              </div>
+            ))}
           </div>
-          {message.error && (
-            <div
-              className={`mt-2 text-sm ${
-                isUser ? "text-red-200" : "text-danger"
-              }`}
-            >
-              Error: {message.error}
-            </div>
-          )}
+        )}
+        <div className="prose prose-sm max-w-none dark:prose-invert">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {message.content}
+          </ReactMarkdown>
+        </div>
+        {message.error && (
           <div
-            className={`text-xs mt-2 ${
-              isUser ? "opacity-70" : "text-default-500"
+            className={`mt-2 text-sm ${
+              isUser ? "text-red-200" : "text-danger"
             }`}
           >
-            {message.timestamp.toLocaleTimeString()}
+            Error: {message.error}
           </div>
-        </CardBody>
-      </Card>
+        )}
+        <div
+          className={`text-xs mt-2 ${
+            isUser ? "opacity-70" : "text-default-500"
+          }`}
+        >
+          {message.timestamp.toLocaleTimeString()}
+        </div>
+      </div>
     </div>
   );
-}
-
-function MarkdownRenderer({ content }: { content: string }) {
-  // Simple markdown rendering (can be enhanced with react-markdown)
-  const lines = content.split("\n");
-  const elements: JSX.Element[] = [];
-  let inCodeBlock = false;
-  let codeBlockContent: string[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (line.startsWith("```")) {
-      if (inCodeBlock) {
-        // End code block
-        elements.push(
-          <pre
-            key={i}
-            className="bg-gray-800 text-gray-100 p-2 rounded my-2 overflow-x-auto"
-          >
-            <code>{codeBlockContent.join("\n")}</code>
-          </pre>
-        );
-        codeBlockContent = [];
-        inCodeBlock = false;
-      } else {
-        // Start code block
-        inCodeBlock = true;
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      codeBlockContent.push(line);
-      continue;
-    }
-
-    // Headers
-    if (line.startsWith("# ")) {
-      elements.push(
-        <h1 key={i} className="text-2xl font-bold my-2">
-          {line.slice(2)}
-        </h1>
-      );
-    } else if (line.startsWith("## ")) {
-      elements.push(
-        <h2 key={i} className="text-xl font-semibold my-2">
-          {line.slice(3)}
-        </h2>
-      );
-    } else if (line.startsWith("### ")) {
-      elements.push(
-        <h3 key={i} className="text-lg font-medium my-1">
-          {line.slice(4)}
-        </h3>
-      );
-    } else if (line.trim() === "") {
-      elements.push(<br key={i} />);
-    } else {
-      // Regular text with basic formatting
-      const formatted = line
-        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-        .replace(/\*(.+?)\*/g, "<em>$1</em>")
-        .replace(
-          /`(.+?)`/g,
-          "<code class='bg-gray-200 px-1 rounded'>$1</code>"
-        );
-      elements.push(
-        <p
-          key={i}
-          className="my-1"
-          dangerouslySetInnerHTML={{ __html: formatted }}
-        />
-      );
-    }
-  }
-
-  if (inCodeBlock && codeBlockContent.length > 0) {
-    elements.push(
-      <pre
-        key="final-code"
-        className="bg-gray-800 text-gray-100 p-2 rounded my-2 overflow-x-auto"
-      >
-        <code>{codeBlockContent.join("\n")}</code>
-      </pre>
-    );
-  }
-
-  return <div>{elements}</div>;
 }

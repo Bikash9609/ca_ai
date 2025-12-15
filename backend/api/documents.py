@@ -288,7 +288,7 @@ async def process_document_task(task: ProcessingTask) -> dict:
                         text = ocr_result.get("text", "")
                         print(f"[PROCESSING STEP] OCR completed. Extracted text length: {len(text)} characters")
                     except Exception as ocr_error:
-                        logger.error(f"Error during OCR: {ocr_error}")
+                        logger.error(f"Error during OCR: {ocr_error}", exc_info=True)
                         print(f"[PROCESSING STEP] OCR failed: {ocr_error}")
                 else:
                     print(f"[PROCESSING STEP] PDF parsing completed. Extracted text length: {len(text)} characters")
@@ -329,10 +329,21 @@ async def process_document_task(task: ProcessingTask) -> dict:
                 "file_path": str(file_path)
             }
             
+            # Parse document for smart chunking (if not already parsed)
+            parsed_data = None
+            if file_ext in ['pdf', 'xlsx', 'xls']:
+                try:
+                    parsed_data = await asyncio.to_thread(parser.parse, file_path)
+                    print(f"[PROCESSING STEP] Parsed document for smart chunking: {len(parsed_data.get('page_texts', []))} pages, {len(parsed_data.get('tables', []))} tables")
+                except Exception as e:
+                    logger.warning(f"Could not parse document for smart chunking: {e}")
+                    parsed_data = None
+            
             result = await indexer.index_document(
                 document_id=document_id,
                 text=text,
-                document_metadata=document_metadata
+                document_metadata=document_metadata,
+                parsed_data=parsed_data
             )
             
             print(f"[PROCESSING STEP] Step 2 completed. Chunks created: {result.get('chunks_created', 0)}")
@@ -800,14 +811,14 @@ async def download_document(document_id: str, client_id: str = Query(...)):
 
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: str, client_id: str = Query(...)):
-    """Delete a document"""
+    """Delete a document and all its associated data"""
     workspace_path = get_default_workspace_path()
     workspace_manager = WorkspaceManager(workspace_path)
     
     db_path = workspace_manager.get_client_database_path(client_id)
     db_manager = DatabaseManager(str(db_path))
     
-    # Get file path before deleting
+    # Get document info before deleting
     row = await db_manager.fetchone(
         "SELECT file_path FROM documents WHERE id = ? AND client_id = ?",
         (document_id, client_id)
@@ -816,17 +827,68 @@ async def delete_document(document_id: str, client_id: str = Query(...)):
     if not row:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # Delete from database (cascade will delete chunks)
+    file_path = Path(row[0])
+    
+    # Get all chunk IDs for this document to clean up question_answers
+    chunk_rows = await db_manager.fetchall(
+        "SELECT id FROM document_chunks WHERE document_id = ?",
+        (document_id,)
+    )
+    chunk_ids = [row[0] for row in chunk_rows]
+    
+    # Delete question_answers that reference chunks from this document
+    if chunk_ids:
+        import json
+        # Get all question_answers for this client
+        qa_rows = await db_manager.fetchall(
+            "SELECT id, chunk_ids FROM question_answers WHERE client_id = ?",
+            (client_id,)
+        )
+        
+        # Find QAs that reference any chunk from this document
+        qa_ids_to_delete = []
+        for qa_row in qa_rows:
+            qa_id = qa_row[0]
+            qa_chunk_ids = json.loads(qa_row[1]) if qa_row[1] else []
+            # If any chunk from this document is referenced, delete the QA
+            if any(chunk_id in chunk_ids for chunk_id in qa_chunk_ids):
+                qa_ids_to_delete.append(qa_id)
+        
+        # Delete those question_answers
+        if qa_ids_to_delete:
+            placeholders = ",".join("?" * len(qa_ids_to_delete))
+            await db_manager.execute(
+                f"DELETE FROM question_answers WHERE id IN ({placeholders})",
+                tuple(qa_ids_to_delete)
+            )
+            logger.info(f"Deleted {len(qa_ids_to_delete)} question_answers referencing document {document_id}")
+    
+    # Delete document chunks and FTS5 entries
+    from services.indexing import VectorStorage
+    vector_storage = VectorStorage(db_manager)
+    await vector_storage.delete_document_chunks(document_id)
+    
+    # Delete document_pages (should cascade, but being explicit)
+    await db_manager.execute(
+        "DELETE FROM document_pages WHERE document_id = ?",
+        (document_id,)
+    )
+    
+    # Delete from documents table
     await db_manager.execute(
         "DELETE FROM documents WHERE id = ? AND client_id = ?",
         (document_id, client_id)
     )
     
-    # Delete file
-    file_path = Path(row[0])
+    # Delete file from disk
     if file_path.exists():
-        file_path.unlink()
+        try:
+            file_path.unlink()
+            logger.info(f"Deleted file: {file_path}")
+        except Exception as e:
+            logger.warning(f"Failed to delete file {file_path}: {e}")
     
+    logger.info(f"Deleted document {document_id} and all associated data")
     return {"status": "deleted", "document_id": document_id}
 
 

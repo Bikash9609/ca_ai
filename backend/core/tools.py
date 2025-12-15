@@ -9,8 +9,9 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from database.connection import DatabaseManager
-from services.search import HybridSearch
+from services.search import HybridSearch, MultiPassRetriever
 from services.embedding import EmbeddingGenerator
+from services.context_packer import ContextPacker
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -40,16 +41,19 @@ class ToolExecutor:
         # Initialize services
         self.embedding_gen = EmbeddingGenerator()
         self.search = HybridSearch(db_manager)
+        self.multi_pass_retriever = MultiPassRetriever(db_manager)
+        self.context_packer = ContextPacker()
     
     async def search_documents(
         self,
         query: str,
         doc_type: Optional[str] = None,
         period: Optional[str] = None,
-        limit: int = 20
+        limit: int = 20,
+        use_multi_pass: bool = True
     ) -> Dict[str, Any]:
         """
-        Search documents using hybrid search
+        Search documents using multi-pass retrieval (Cursor-style)
         
         Returns summary information only (no raw file paths or content)
         """
@@ -58,19 +62,30 @@ class ToolExecutor:
             query_embedding = self.embedding_gen.generate(query)
             
             # Build filters
-            filters = {"client_id": self.client_id}
+            filters = {}
             if doc_type:
                 filters["doc_type"] = doc_type
             if period:
                 filters["period"] = period
             
-            # Perform search
-            results = await self.search.search(
-                query=query,
-                query_embedding=query_embedding,
-                limit=limit,
-                filters=filters
-            )
+            # Use multi-pass retrieval if enabled
+            if use_multi_pass:
+                results = await self.multi_pass_retriever.retrieve_context(
+                    query=query,
+                    query_embedding=query_embedding,
+                    client_id=self.client_id,
+                    limit=min(limit, 15),  # Multi-pass returns 5-15 chunks
+                    filters=filters if filters else None
+                )
+            else:
+                # Fallback to hybrid search
+                filters["client_id"] = self.client_id
+                results = await self.search.search(
+                    query=query,
+                    query_embedding=query_embedding,
+                    limit=limit,
+                    filters=filters
+                )
             
             # Format results (summary only - no file paths)
             formatted_results = []
@@ -78,27 +93,35 @@ class ToolExecutor:
                 # Truncate text preview
                 text_preview = result.get("text", "")[:500]
                 
+                # Get page reference if available
+                metadata = result.get("metadata", {}) or {}
+                page = metadata.get("page")
+                
                 formatted_results.append({
                     "document_id": result.get("document_id"),
                     "doc_type": result.get("doc_type"),
                     "period": result.get("period"),
                     "category": result.get("category"),
                     "text_preview": text_preview,
-                    "similarity": result.get("combined_score", 0.0),
-                    "chunk_index": result.get("chunk_index")
+                    "similarity": result.get("combined_score", 0.0) or result.get("similarity", 0.0),
+                    "chunk_index": result.get("chunk_index"),
+                    "chunk_id": result.get("chunk_id"),
+                    "page": page
                 })
             
             return {
                 "count": len(formatted_results),
                 "results": formatted_results,
-                "query": query
+                "query": query,
+                "chunks": results  # Return full chunks for context packing
             }
         except Exception as e:
             logger.error(f"Error in search_documents: {e}")
             return {
                 "count": 0,
                 "results": [],
-                "error": str(e)
+                "error": str(e),
+                "chunks": []
             }
     
     async def get_invoice(
