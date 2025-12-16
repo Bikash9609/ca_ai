@@ -3,6 +3,7 @@ LLM Service - Unified multi-provider LLM integration with context firewall using
 """
 
 import os
+import uuid
 # Disable model source connectivity check for Google Generative AI
 # Must be set before importing google.genai to prevent connectivity checks
 os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
@@ -86,6 +87,8 @@ class LLMService:
         self.context_packer = ContextPacker()
         self.qa_tracker = QATracker(db_manager) if db_manager else None
         self.conversation_manager = get_conversation_manager()
+        self.chat_id: Optional[str] = None
+        self.chat_title: Optional[str] = None
         
         # Store last search chunks for context packing
         self._last_search_chunks: List[Dict[str, Any]] = []
@@ -523,6 +526,10 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
         # Store question for Q&A tracking
         self._last_question = query
         
+        # Ensure chat id exists
+        if not self.chat_id:
+            self.chat_id = uuid.uuid4().hex
+        
         # Add user message to history
         self.conversation_history.append({
             "role": "user",
@@ -552,14 +559,22 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
             if self.provider == LLMProvider.OLLAMA:
                 litellm_params["api_base"] = self.ollama_url
             
+            # Log LLM request
+            log_params = self._sanitize_params_for_logging(litellm_params.copy())
+            logger.info(f"LLM Request - Model: {self.model_name}, Provider: {self.provider.value}, Params: {json.dumps(log_params, default=str, indent=2)}")
+            
             # Call LiteLLM
             response = await litellm.acompletion(**litellm_params)
             
             # Process streaming response
             current_text = ""
             tool_calls = {}
+            executed_tool_calls = set()
+            response_chunks_count = 0
+            tool_calls_count = 0
             
             async for chunk in response:
+                response_chunks_count += 1
                 if not hasattr(chunk, 'choices') or not chunk.choices:
                     continue
                 
@@ -608,6 +623,14 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                             logger.warning(f"Failed to parse tool arguments: {tool_call['arguments']}")
                             args = {}
                         
+                        key = (tool_call["name"], json.dumps(args, sort_keys=True, default=str))
+                        if key in executed_tool_calls:
+                            continue
+                        executed_tool_calls.add(key)
+                        tool_calls_count += 1
+                        
+                        logger.info(f"LLM Tool Call - Tool: {tool_call['name']}, Args: {json.dumps(args, default=str)}")
+                        
                         yield {
                             "type": "tool_call",
                             "content": {
@@ -625,6 +648,12 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                         )
                         
                         if success:
+                            # Log tool result (truncate if too large)
+                            result_str = json.dumps(result, default=str)
+                            if len(result_str) > 1000:
+                                result_str = result_str[:1000] + "... (truncated)"
+                            logger.info(f"LLM Tool Result - Tool: {tool_call['name']}, Result: {result_str}")
+                            
                             yield {
                                 "type": "tool_result",
                                 "content": {
@@ -668,10 +697,16 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                             if self.provider == LLMProvider.OLLAMA:
                                 follow_up_params["api_base"] = self.ollama_url
                             
+                            # Log follow-up LLM request
+                            log_follow_up_params = self._sanitize_params_for_logging(follow_up_params.copy())
+                            logger.info(f"LLM Follow-up Request - Model: {self.model_name}, Params: {json.dumps(log_follow_up_params, default=str, indent=2)}")
+                            
                             follow_up_response = await litellm.acompletion(**follow_up_params)
                             
                             follow_up_text = ""
+                            follow_up_chunks_count = 0
                             async for follow_up_chunk in follow_up_response:
+                                follow_up_chunks_count += 1
                                 if hasattr(follow_up_chunk, 'choices') and follow_up_chunk.choices:
                                     delta = follow_up_chunk.choices[0].delta
                                     if hasattr(delta, 'content') and delta.content:
@@ -680,6 +715,9 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                                             "type": "text",
                                             "content": delta.content
                                         }
+                            
+                            # Log follow-up response summary
+                            logger.info(f"LLM Follow-up Response - Chunks: {follow_up_chunks_count}, Text Length: {len(follow_up_text)}")
                             
                             # Ensure assistant message is recorded even if no further text streamed
                             if follow_up_text:
@@ -698,12 +736,26 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                                 "content": f"Tool execution failed: {error}"
                             }
             
+            # Log main response summary
+            logger.info(f"LLM Response - Chunks: {response_chunks_count}, Tool Calls: {tool_calls_count}, Text Length: {len(current_text)}")
+            
             # Add final assistant response to history
             if current_text:
                 self.conversation_history.append({
                     "role": "assistant",
                     "content": current_text
                 })
+                
+                # Set chat title on first assistant response
+                if not self.chat_title:
+                    self.chat_title = self._generate_chat_title(current_text, query)
+                    yield {
+                        "type": "chat_title",
+                        "content": {
+                            "chat_id": self.chat_id,
+                            "title": self.chat_title
+                        }
+                    }
                 
                 # Track Q&A if tracker available
                 if self.qa_tracker and self.client_id and self._last_search_chunks:
@@ -794,6 +846,31 @@ TDS: User: "What is TDS deducted under section 194A for Q1 2024?"
                 })
         
         return messages
+    
+    def _sanitize_params_for_logging(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Sanitize parameters for logging (remove sensitive data)"""
+        sanitized = params.copy()
+        if "api_key" in sanitized:
+            sanitized["api_key"] = "***REDACTED***" if sanitized["api_key"] else None
+        # Truncate messages if too long
+        if "messages" in sanitized and isinstance(sanitized["messages"], list):
+            messages_copy = []
+            for msg in sanitized["messages"]:
+                msg_copy = msg.copy()
+                if "content" in msg_copy and isinstance(msg_copy["content"], str) and len(msg_copy["content"]) > 500:
+                    msg_copy["content"] = msg_copy["content"][:500] + "... (truncated)"
+                messages_copy.append(msg_copy)
+            sanitized["messages"] = messages_copy
+        return sanitized
+    
+    def _generate_chat_title(self, response_text: str, fallback: str) -> str:
+        """Generate a short chat title from first response"""
+        source = response_text.strip() or fallback.strip()
+        if not source:
+            return "New Chat"
+        first_sentence = source.split("\n")[0].split(".")[0]
+        title = first_sentence[:80].strip()
+        return title or "New Chat"
     
     async def _execute_tool(self, tool_name: str, params: Dict[str, Any]) -> Any:
         """Execute a tool (called through firewall)"""
